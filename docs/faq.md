@@ -1,5 +1,7 @@
 # 常见问题
 
+[官网与视频演示](https://director-theater-share.shanxixi0329.chatgpt.site/#demo) · [下载最新版](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest) · [图文上手](quickstart.md) · [会员激活](activation.md) · [返回项目首页](../README.md)
+
 ## 下载哪个文件？
 
 普通安装选带 `Setup` 的 Windows x64 `.exe`。发布页另外提供 SHA-256 校验文件和管理员签发工具。[下载页](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest)

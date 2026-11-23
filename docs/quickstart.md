@@ -1,8 +1,8 @@
 # 导演台剧场图文上手
 
-用示例项目《雨停前的来信》第 8 集走一遍改稿和审片。截图来自 Windows 公开版 V0.1.12，剧本和样片均为演示内容。
+用示例项目《雨停前的来信》第 8 集走一遍改稿和审片。以下以 Windows 公开版为例，剧本和样片均为虚构演示内容。
 
-[下载 Windows x64 安装程序](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest) · [返回项目首页](../README.md)
+[官网与视频演示](https://director-theater-share.shanxixi0329.chatgpt.site/#demo) · [下载 Windows x64 安装程序](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest) · [返回项目首页](../README.md)
 
 ## 1. 打开或创建项目
 

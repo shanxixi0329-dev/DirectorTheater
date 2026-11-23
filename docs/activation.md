@@ -1,5 +1,7 @@
 # 会员激活
 
+[官网与视频演示](https://director-theater-share.shanxixi0329.chatgpt.site/#demo) · [下载最新版](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest) · [图文上手](quickstart.md) · [常见问题](faq.md) · [返回项目首页](../README.md)
+
 公开版首次使用有 7 天编辑试用。试用到期后仍可阅读项目。Plus、Pro 和永久会员通过本机的授权文件激活。
 
 ## 在软件里导入授权
