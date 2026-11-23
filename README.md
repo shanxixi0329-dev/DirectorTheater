@@ -6,6 +6,14 @@
 
 **[下载 Windows x64 版](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest)**
 
+## 截图演示
+
+示例项目《雨停前的来信》的第 8 集在剧本编辑页打开，顶部可以切换集数、保存修改或另开窗口对照。
+
+![导演台剧场第 8 集剧本编辑页，顶部显示集数、字数和保存按钮](docs/images/02-edit-episode.png)
+
+[跟着截图操作，从创建项目到审片复审](docs/quickstart.md)
+
 ## 主要功能
 
 - **按集编辑**。在原文、大纲、剧本、分镜和提示词之间切换。正文独立滚动，可实时查看字数，也可用鼠标侧键切换上下集。
