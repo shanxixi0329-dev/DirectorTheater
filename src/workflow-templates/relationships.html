@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>人物关系可视化 · 参考模板</title>
+  <style>
+    :root{color-scheme:dark;--bg:#091019;--panel:#101a27;--panel2:#142235;--text:#e8eef7;--muted:#8da0b8;--line:#31445c;--accent:#f3c969}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -10%,#21334c 0,#091019 45%);color:var(--text);font:14px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;overflow:hidden}
+    button,input{font:inherit}.app{height:100vh;display:grid;grid-template-rows:auto 1fr}.top{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid #26364a;background:#0c1521ee;backdrop-filter:blur(14px)}
+    .title{min-width:280px}.title h1{font-size:18px;margin:0}.title p{margin:2px 0 0;color:var(--muted);font-size:12px}.actions{display:flex;flex-wrap:wrap;gap:7px;margin-left:auto}
+    button,.pill{color:#dce7f5;background:#17263a;border:1px solid #30445e;border-radius:9px;padding:7px 10px;cursor:pointer}button:hover,.pill:hover{border-color:#6d89ad}.pill.active{color:#07101a;background:var(--pill,#f3c969);border-color:var(--pill,#f3c969);font-weight:700}
+    .layout{min-height:0;display:grid;grid-template-columns:285px minmax(0,1fr) 325px}.side{overflow:auto;padding:14px;background:#0d1723eb}.left{border-right:1px solid #26364a}.right{border-left:1px solid #26364a}.section{margin-bottom:18px}.section h2{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#8fa6c2;margin:0 0 8px}.stack{display:flex;flex-wrap:wrap;gap:6px}
+    input{width:100%;padding:9px 10px;color:var(--text);background:#09121d;border:1px solid #30445e;border-radius:9px;outline:none}input:focus{border-color:#e8bd5c}.legend{display:grid;gap:7px;color:#a9b8ca;font-size:12px}.swatch{display:inline-block;width:28px;margin-right:7px;vertical-align:middle;border-top:3px solid #8fa6c2}.swatch.dash{border-top-style:dashed}
+    .canvas{position:relative;min-width:0;min-height:0}.canvas-note{position:absolute;z-index:3;top:12px;left:50%;transform:translateX(-50%);padding:6px 10px;border-radius:999px;background:#0b1420cc;border:1px solid #2e4159;color:#a7b7c9;font-size:12px;pointer-events:none}
+    svg{width:100%;height:100%;display:block;touch-action:none;user-select:none}.edge-visible{fill:none;stroke-width:2.4;opacity:.82;transition:.18s}.edge-hit{fill:none;stroke:transparent;stroke-width:18;pointer-events:stroke}.edge-group{cursor:pointer;transition:.18s}.edge-label-bg{fill:#0a131f;stroke:#3b506a;rx:7;opacity:.92;transition:.18s}.edge-label{fill:#e8eef7;font-size:12px;font-weight:650;text-anchor:middle;dominant-baseline:middle;pointer-events:all;transition:.18s}.edge-group.dashed .edge-visible{stroke-dasharray:8 7}.edge-group.dim{opacity:.1}.edge-group.selected .edge-visible{stroke-width:6;opacity:1;filter:drop-shadow(0 0 7px currentColor)}.edge-group.selected .edge-label{font-size:16px;fill:#fff}.edge-group.selected .edge-label-bg{stroke:#fff;stroke-width:2;fill:#4b3b17}
+    .node{cursor:grab;transition:opacity .18s}.node:active{cursor:grabbing}.node rect{fill:#14243a;stroke-width:2;rx:13;filter:drop-shadow(0 6px 8px #0008)}.node .name{fill:#fff;font-size:16px;font-weight:800;text-anchor:middle}.node .role{fill:#adc0d8;font-size:11px;text-anchor:middle}.node.dim{opacity:.16}.node.selected rect,.node.hit rect{stroke:#fff!important;stroke-width:4;filter:drop-shadow(0 0 11px #fff8)}
+    .empty{color:#8fa1b7;padding:12px;border:1px dashed #344960;border-radius:12px}.card{padding:12px;background:#121f30;border:1px solid #2a3d55;border-radius:12px;margin-bottom:10px}.card b{color:#f3c969}.meta{color:#9eb0c6;font-size:12px}.rel{padding:7px 0;border-bottom:1px solid #26384e}.rel:last-child{border-bottom:0}
+    dialog{width:min(1100px,94vw);height:min(760px,90vh);border:1px solid #3a506d;border-radius:16px;padding:0;color:var(--text);background:#0c1622;box-shadow:0 30px 90px #000b}dialog::backdrop{background:#02060bb8}.dlg-head{position:sticky;top:0;display:flex;align-items:center;padding:12px 16px;background:#111e2e;border-bottom:1px solid #2a3d55}.dlg-head h2{margin:0;font-size:16px}.dlg-head button{margin-left:auto}.tabs{display:flex;gap:7px;padding:12px 16px}.table-wrap{height:calc(100% - 106px);overflow:auto;padding:0 16px 18px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:9px;border-bottom:1px solid #26384e;text-align:left;vertical-align:top}th{position:sticky;top:0;background:#16263a;color:#f3c969}.hidden{display:none!important}
+    @media(max-width:980px){body{overflow:auto}.app{height:auto;min-height:100vh}.layout{grid-template-columns:230px minmax(560px,1fr)}.right{grid-column:1/-1;border-left:0;border-top:1px solid #26364a}.canvas{height:680px}.top{align-items:flex-start}.actions{justify-content:flex-end}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="title"><h1>示例作品 · 人物关系网</h1><p>参考模板｜请替换 NODES 与 EDGES 数据、作品名和范围边界</p></div>
+    <div class="actions"><button id="labelsBtn">关系文字：全显示</button><button id="fitBtn">适配全图</button><button id="tableBtn">身份/关系总表</button><button id="clearBtn">清除聚焦</button></div>
+  </header>
+  <div class="layout">
+    <aside class="side left">
+      <div class="section"><h2>搜索</h2><input id="search" placeholder="姓名 / 身份 / 关系"></div>
+      <div class="section"><h2>视图模式</h2><div class="stack" id="modes"></div></div>
+      <div class="section"><h2>关系类型</h2><div class="stack" id="cats"></div></div>
+      <div class="section"><h2>人物势力</h2><div class="stack" id="groups"></div></div>
+      <div class="section"><h2>线型说明</h2><div class="legend"><span><i class="swatch"></i>明确关系</span><span><i class="swatch dash"></i>流言 / 潜在 / 待确认</span><span>箭头：父母 → 子女、上级 → 下级</span></div></div>
+      <div class="section"><h2>操作</h2><div class="legend"><span>点击人物：聚焦直接关系</span><span>点击线或文字：同步高亮关系</span><span>拖动节点；拖动画布；滚轮缩放</span></div></div>
+    </aside>
+    <main class="canvas">
+      <div class="canvas-note">示例数据仅用于演示交互，不代表任何具体作品事实</div>
+      <svg id="graph" viewBox="0 0 1400 900" aria-label="人物关系图">
+        <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="context-stroke"></path></marker></defs>
+        <g id="viewport"><g id="edgeLayer"></g><g id="nodeLayer"></g></g>
+      </svg>
+    </main>
+    <aside class="side right"><div class="section"><h2>详情</h2><div id="detail" class="empty">点击人物或关系线查看详情。</div></div><div class="section"><h2>待确认</h2><div class="card meta">未具名角色、流言和潜在关系应在这里集中说明，不要写成确定事实。</div></div></aside>
+  </div>
+</div>
+
+<dialog id="tableDialog">
+  <div class="dlg-head"><h2>人物身份与关系总表</h2><button id="closeDialog">关闭</button></div>
+  <div class="tabs"><button class="active" data-tab="people">人物身份</button><button data-tab="relations">关系总表</button></div>
+  <div class="table-wrap" id="peoplePane"><table><thead><tr><th>人物</th><th>身份</th><th>势力</th><th>状态/证据</th></tr></thead><tbody id="peopleBody"></tbody></table></div>
+  <div class="table-wrap hidden" id="relationsPane"><table><thead><tr><th>人物A</th><th>关系</th><th>人物B</th><th>类别</th><th>确定性/证据</th></tr></thead><tbody id="relationsBody"></tbody></table></div>
+</dialog>
+
+<script>
+const NODES=[
+  {id:'ruler',name:'萧霁',role:'新帝',group:'皇室',x:700,y:115,status:'掌权初期',evidence:'示例'},
+  {id:'heroine',name:'沈昭',role:'女主角·尚书嫡女',group:'核心',x:700,y:430,status:'卷入朝局',evidence:'示例'},
+  {id:'father',name:'沈衡',role:'吏部尚书',group:'沈家',x:330,y:245,status:'在朝',evidence:'示例'},
+  {id:'mother',name:'顾氏',role:'尚书夫人',group:'沈家',x:140,y:245,status:'健在',evidence:'示例'},
+  {id:'brother',name:'沈澈',role:'沈家长子',group:'沈家',x:330,y:500,status:'外任',evidence:'示例'},
+  {id:'guard',name:'陆沉',role:'禁军统领',group:'皇室',x:990,y:300,status:'奉命监视',evidence:'示例'},
+  {id:'cousin',name:'顾临川',role:'世家公子',group:'顾家',x:1100,y:570,status:'婚约待定',evidence:'示例'},
+  {id:'rumor',name:'未具名宫人',role:'消息来源待确认',group:'待确认',x:1000,y:735,status:'身份不明',evidence:'示例'}
+];
+const EDGES=[
+  {a:'father',b:'heroine',label:'父亲 → 女儿',category:'血缘',direction:'forward',certainty:'confirmed',scope:['all','family','core'],evidence:'示例',note:'明确父女。'},
+  {a:'mother',b:'heroine',label:'母亲 → 女儿',category:'血缘',direction:'forward',certainty:'confirmed',scope:['all','family'],evidence:'示例',note:'明确母女。'},
+  {a:'father',b:'brother',label:'父亲 → 儿子',category:'血缘',direction:'forward',certainty:'confirmed',scope:['all','family'],evidence:'示例',note:'明确父子。'},
+  {a:'mother',b:'brother',label:'母亲 → 儿子',category:'血缘',direction:'forward',certainty:'confirmed',scope:['all','family'],evidence:'示例',note:'明确母子。'},
+  {a:'father',b:'mother',label:'夫妻',category:'婚姻/婚约',direction:'none',certainty:'confirmed',scope:['all','family'],evidence:'示例',note:'正式夫妻。'},
+  {a:'heroine',b:'brother',label:'兄妹',category:'血缘',direction:'none',certainty:'confirmed',scope:['all','family'],evidence:'示例',note:'同父同母兄妹。'},
+  {a:'ruler',b:'guard',label:'君臣 / 上下级',category:'主从/组织',direction:'forward',certainty:'confirmed',scope:['all','story','core'],evidence:'示例',note:'皇帝直接调遣禁军统领。'},
+  {a:'guard',b:'heroine',label:'奉命监视',category:'剧情关系',direction:'forward',certainty:'confirmed',scope:['all','story','core'],evidence:'示例',note:'监视关系推动主线。'},
+  {a:'heroine',b:'cousin',label:'表亲 / 旧婚约',category:'婚姻/婚约',direction:'none',certainty:'reported',scope:['all','family','story','core'],evidence:'示例',note:'婚约只存在于长辈说法，尚未确认。'},
+  {a:'rumor',b:'heroine',label:'流言来源',category:'流言/做局',direction:'forward',certainty:'unknown',scope:['all','story'],evidence:'示例',note:'消息来源与身份均待确认。'},
+  {a:'ruler',b:'heroine',label:'利用 → 特殊关注',category:'感情/暧昧',direction:'none',certainty:'potential',scope:['all','story','core'],evidence:'示例',note:'存在铺垫，但不可直接写成爱情。'}
+];
+const CAT_COLORS={'血缘':'#62c3ff','婚姻/婚约':'#ef8ecb','感情/暧昧':'#ff9c70','主从/组织':'#a08cff','剧情关系':'#f3c969','流言/做局':'#8c9bad'};
+const GROUP_COLORS={'核心':'#f3c969','皇室':'#a08cff','沈家':'#62c3ff','顾家':'#ef8ecb','待确认':'#8c9bad'};
+const MODES={all:'全景关系',family:'亲缘婚姻',story:'剧情关系',core:'核心关系'};
+const byId=Object.fromEntries(NODES.map(n=>[n.id,n]));
+const pos=Object.fromEntries(NODES.map(n=>[n.id,{x:n.x,y:n.y}]));
+const activeCats=new Set(Object.keys(CAT_COLORS)),activeGroups=new Set(Object.keys(GROUP_COLORS));
+let mode='all',selectedNode=null,selectedEdge=null,labelsAll=true,view={x:0,y:0,k:1},pan=null,drag=null,dragMoved=false;
+const svg=document.getElementById('graph'),viewport=document.getElementById('viewport'),edgeLayer=document.getElementById('edgeLayer'),nodeLayer=document.getElementById('nodeLayer'),detail=document.getElementById('detail');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const el=(tag,attrs={})=>{const x=document.createElementNS('http://www.w3.org/2000/svg',tag);Object.entries(attrs).forEach(([k,v])=>x.setAttribute(k,v));return x};
+function edgePath(e){const a=pos[e.a],b=pos[e.b],dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,pad=76;return `M ${a.x+dx/len*pad} ${a.y+dy/len*pad} L ${b.x-dx/len*pad} ${b.y-dy/len*pad}`}
+function edgeMid(e){const a=pos[e.a],b=pos[e.b];return{x:(a.x+b.x)/2,y:(a.y+b.y)/2}}
+function visibleEdge(e){return e.scope.includes(mode)&&activeCats.has(e.category)&&activeGroups.has(byId[e.a].group)&&activeGroups.has(byId[e.b].group)}
+function render(){edgeLayer.textContent='';nodeLayer.textContent='';EDGES.forEach((e,i)=>{const g=el('g',{class:`edge-group ${e.certainty==='confirmed'?'':'dashed'}`,'data-index':i});const color=CAT_COLORS[e.category]||'#9fb1c7',d=edgePath(e),m=edgeMid(e),w=Math.max(52,[...e.label].length*13+20);g.style.color=color;g.append(el('path',{class:'edge-hit',d}));const line=el('path',{class:'edge-visible',d,stroke:color});if(e.direction!=='none')line.setAttribute('marker-end','url(#arrow)');g.append(line);g.append(el('rect',{class:'edge-label-bg',x:m.x-w/2,y:m.y-16,width:w,height:30}));const t=el('text',{class:'edge-label',x:m.x,y:m.y});t.textContent=e.label;g.append(t);edgeLayer.append(g)});
+  NODES.forEach(n=>{const g=el('g',{class:'node','data-id':n.id,transform:`translate(${pos[n.id].x},${pos[n.id].y})`});const color=GROUP_COLORS[n.group]||'#8da0b8';g.append(el('rect',{x:-78,y:-36,width:156,height:72,stroke:color}));const name=el('text',{class:'name',x:0,y:-5});name.textContent=n.name;g.append(name);const role=el('text',{class:'role',x:0,y:18});role.textContent=n.role.length>18?n.role.slice(0,18)+'…':n.role;g.append(role);g.addEventListener('pointerdown',ev=>startDrag(ev,n.id));g.addEventListener('click',ev=>{ev.stopPropagation();if(!dragMoved)selectNode(n.id)});nodeLayer.append(g)});applyFilters()}
+function applyFilters(){const connected=new Set();EDGES.forEach((e,i)=>{const show=visibleEdge(e);edgeLayer.children[i].classList.toggle('hidden',!show);if(show){connected.add(e.a);connected.add(e.b)}});NODES.forEach((n,i)=>nodeLayer.children[i].classList.toggle('hidden',!activeGroups.has(n.group)||(mode!=='all'&&!connected.has(n.id))));applyFocus();updateLabels()}
+function applyFocus(){[...nodeLayer.children].forEach(g=>g.classList.remove('dim','selected'));[...edgeLayer.children].forEach(g=>g.classList.remove('dim','selected'));if(selectedEdge!==null){const e=EDGES[selectedEdge];[...edgeLayer.children].forEach((g,i)=>g.classList.toggle('dim',i!==selectedEdge));[...nodeLayer.children].forEach(g=>g.classList.toggle('dim',![e.a,e.b].includes(g.dataset.id)));edgeLayer.children[selectedEdge]?.classList.add('selected');return}if(selectedNode){const keep=new Set([selectedNode]);EDGES.forEach((e,i)=>{const on=e.a===selectedNode||e.b===selectedNode;if(on&&visibleEdge(e)){keep.add(e.a);keep.add(e.b)}edgeLayer.children[i].classList.toggle('dim',!on)});[...nodeLayer.children].forEach(g=>g.classList.toggle('dim',!keep.has(g.dataset.id)));nodeLayer.querySelector(`[data-id="${selectedNode}"]`)?.classList.add('selected')}}
+function updateLabels(){EDGES.forEach((e,i)=>{const g=edgeLayer.children[i],focused=selectedEdge===i||selectedNode===e.a||selectedNode===e.b;g.querySelector('.edge-label').classList.toggle('hidden',!labelsAll&&!focused);g.querySelector('.edge-label-bg').classList.toggle('hidden',!labelsAll&&!focused)})}
+function selectNode(id){selectedNode=id;selectedEdge=null;applyFocus();const n=byId[id],rels=EDGES.filter(e=>e.a===id||e.b===id);detail.className='';detail.innerHTML=`<div class="card"><b>${esc(n.name)}</b><div>${esc(n.role)}</div><div class="meta">${esc(n.group)}｜${esc(n.status)}｜证据：${esc(n.evidence)}</div></div><div class="card"><b>全部直接关系</b>${rels.map(e=>`<div class="rel">${esc(e.a===id?byId[e.b].name:byId[e.a].name)} · ${esc(e.label)}<div class="meta">${esc(e.category)}｜${esc(e.certainty)}</div></div>`).join('')}</div>`}
+function selectEdge(i){selectedEdge=i;selectedNode=null;applyFocus();updateLabels();const e=EDGES[i];detail.className='';detail.innerHTML=`<div class="card"><b>${esc(byId[e.a].name)} ↔ ${esc(byId[e.b].name)}</b><div>${esc(e.label)}</div></div><div class="card"><b>关系说明</b><p>${esc(e.note)}</p><div class="meta">类别：${esc(e.category)}<br>确定性：${esc(e.certainty)}<br>证据：${esc(e.evidence)}</div></div>`}
+function refreshGeometry(id){const g=nodeLayer.querySelector(`[data-id="${id}"]`);g?.setAttribute('transform',`translate(${pos[id].x},${pos[id].y})`);EDGES.forEach((e,i)=>{if(e.a!==id&&e.b!==id)return;const group=edgeLayer.children[i],d=edgePath(e),m=edgeMid(e),w=Math.max(52,[...e.label].length*13+20);group.querySelectorAll('path').forEach(p=>p.setAttribute('d',d));group.querySelector('.edge-label-bg').setAttribute('x',m.x-w/2);group.querySelector('.edge-label-bg').setAttribute('y',m.y-16);group.querySelector('.edge-label').setAttribute('x',m.x);group.querySelector('.edge-label').setAttribute('y',m.y)})}
+function point(ev){return new DOMPoint(ev.clientX,ev.clientY).matrixTransform(svg.getScreenCTM().inverse())}
+function startDrag(ev,id){const p=point(ev);drag={id,cx:p.x,cy:p.y,x:pos[id].x,y:pos[id].y};dragMoved=false;svg.setPointerCapture(ev.pointerId);ev.stopPropagation()}
+function transform(){viewport.setAttribute('transform',`translate(${view.x} ${view.y}) scale(${view.k})`)}
+function fit(){const r=svg.getBoundingClientRect();if(!r.width||!r.height)return;svg.setAttribute('viewBox',`0 0 ${r.width} ${r.height}`);const values=Object.values(pos);if(!values.length)return;const x0=Math.min(...values.map(p=>p.x))-120,x1=Math.max(...values.map(p=>p.x))+120,y0=Math.min(...values.map(p=>p.y))-90,y1=Math.max(...values.map(p=>p.y))+90;const k=Math.min(1.6,(r.width-40)/(x1-x0),(r.height-70)/(y1-y0));view={x:r.width/2-(x0+x1)/2*k,y:r.height/2-(y0+y1)/2*k,k};transform()}
+svg.addEventListener('click',ev=>{const group=ev.target.closest?.('.edge-group');if(!group)return;ev.preventDefault();ev.stopPropagation();selectEdge(Number(group.dataset.index))},true);
+svg.addEventListener('pointerdown',ev=>{if(ev.target.closest('.node')||ev.target.closest('.edge-group'))return;const p=point(ev);pan={cx:p.x,cy:p.y,x:view.x,y:view.y};svg.setPointerCapture(ev.pointerId)});
+svg.addEventListener('pointermove',ev=>{const p=point(ev);if(drag){const dx=(p.x-drag.cx)/view.k,dy=(p.y-drag.cy)/view.k;if(Math.abs(dx)+Math.abs(dy)>3)dragMoved=true;pos[drag.id]={x:drag.x+dx,y:drag.y+dy};refreshGeometry(drag.id)}else if(pan){view.x=pan.x+p.x-pan.cx;view.y=pan.y+p.y-pan.cy;transform()}});
+svg.addEventListener('pointerup',()=>{drag=null;pan=null;setTimeout(()=>dragMoved=false,0)});svg.addEventListener('click',ev=>{if(!ev.target.closest('.node')&&!ev.target.closest('.edge-group'))clearFocus()});
+svg.addEventListener('wheel',ev=>{ev.preventDefault();const p=point(ev),old=view.k,next=Math.max(.08,Math.min(4,old*(ev.deltaY<0?1.1:.9)));view.x=p.x-(p.x-view.x)*(next/old);view.y=p.y-(p.y-view.y)*(next/old);view.k=next;transform()},{passive:false});
+function clearFocus(){selectedNode=null;selectedEdge=null;applyFocus();updateLabels();detail.className='empty';detail.textContent='点击人物或关系线查看详情。'}
+Object.entries(MODES).forEach(([key,label])=>{const b=document.createElement('button');b.textContent=label;b.className='pill'+(key==='all'?' active':'');b.style.setProperty('--pill','#f3c969');b.onclick=()=>{mode=key;document.querySelectorAll('#modes .pill').forEach(x=>x.classList.toggle('active',x===b));applyFilters()};document.getElementById('modes').append(b)});
+function makePills(container,items,set,colors){items.forEach(v=>{const b=document.createElement('button');b.textContent=v;b.className='pill active';b.style.setProperty('--pill',colors[v]);b.onclick=()=>{set.has(v)?set.delete(v):set.add(v);b.classList.toggle('active',set.has(v));applyFilters()};container.append(b)})}
+makePills(document.getElementById('cats'),Object.keys(CAT_COLORS),activeCats,CAT_COLORS);makePills(document.getElementById('groups'),Object.keys(GROUP_COLORS),activeGroups,GROUP_COLORS);
+document.getElementById('search').addEventListener('input',ev=>{const q=ev.target.value.trim().toLowerCase();NODES.forEach((n,i)=>{const rel=EDGES.filter(e=>e.a===n.id||e.b===n.id).map(e=>e.label).join(' ');nodeLayer.children[i].classList.toggle('hit',!!q&&`${n.name} ${n.role} ${n.group} ${rel}`.toLowerCase().includes(q))})});
+document.getElementById('labelsBtn').onclick=ev=>{labelsAll=!labelsAll;ev.currentTarget.textContent=labelsAll?'关系文字：全显示':'关系文字：仅聚焦';updateLabels()};document.getElementById('fitBtn').onclick=fit;document.getElementById('clearBtn').onclick=clearFocus;
+const dlg=document.getElementById('tableDialog');document.getElementById('tableBtn').onclick=()=>dlg.showModal();document.getElementById('closeDialog').onclick=()=>dlg.close();document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x===b));document.getElementById('peoplePane').classList.toggle('hidden',b.dataset.tab!=='people');document.getElementById('relationsPane').classList.toggle('hidden',b.dataset.tab!=='relations')});
+document.getElementById('peopleBody').innerHTML=NODES.map(n=>`<tr><td><b>${esc(n.name)}</b></td><td>${esc(n.role)}</td><td>${esc(n.group)}</td><td>${esc(n.status)}<br><span class="meta">${esc(n.evidence)}</span></td></tr>`).join('');document.getElementById('relationsBody').innerHTML=EDGES.map(e=>`<tr><td>${esc(byId[e.a].name)}</td><td><b>${esc(e.label)}</b></td><td>${esc(byId[e.b].name)}</td><td>${esc(e.category)}</td><td>${esc(e.certainty)}<br><span class="meta">${esc(e.evidence)} · ${esc(e.note)}</span></td></tr>`).join('');
+render();new ResizeObserver(fit).observe(svg);requestAnimationFrame(fit);
+</script>
+</body>
+</html>

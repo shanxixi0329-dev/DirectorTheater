@@ -1,0 +1,221 @@
+/* Shared interaction and layout fixes. Document editor metrics are intentionally
+   unchanged: the syntax overlay and textarea must remain exactly aligned. */
+:root {
+  color-scheme: light;
+  --ui-focus: var(--green);
+  --ui-hover: var(--surface-hover, var(--soft));
+}
+
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="morandi"] { color-scheme: light; }
+
+/* A short window must scroll navigation instead of pushing the assistant and
+   membership controls below the window. Keep the resize handle outside it. */
+.sidebar { min-height: 0; }
+.shell { align-items: start; }
+.sidebar {
+  align-self: start;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+.sidebar > .brand { flex: 0 0 auto; }
+.sidebar > .nav {
+  flex: 1 1 auto;
+  align-content: start;
+  grid-auto-rows: min-content;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 2px 4px 4px 2px;
+  margin: -2px -4px -4px -2px;
+}
+.sidebar > .sidebar-bottom { flex: 0 0 auto; gap: 6px; }
+.sidebar-foot { padding-top: 7px; line-height: 1.45; }
+/* Keep the assistant useful without letting its art consume the review
+   sidebar. The full assistant panel remains available from the compact dock. */
+.sidebar .frog-assistant { grid-template-columns: minmax(0, 1fr) 72px; gap: 2px; }
+.sidebar .frog-stage { width: 74px; height: 86px; }
+.sidebar .frog-frame { width: 72px; height: 82px; }
+.sidebar .frog-speech { padding: 7px 8px; font-size: 10px; }
+.sidebar .assistant-dock { margin: 2px 0 6px; border-radius: 11px; }
+.sidebar .assistant-dock-button { padding: 7px 8px; gap: 4px; }
+.sidebar .assistant-dock img,
+.sidebar .assistant-dock .assistant-avatar { width: 64px; height: 70px; }
+.sidebar .assistant-dock-copy { gap: 3px; font-size: 10px; line-height: 1.4; }
+.sidebar .assistant-dock-copy strong { font-size: 11px; }
+.sidebar .assistant-dock-copy span { -webkit-line-clamp: 2; }
+.sidebar .assistant-dock-status { padding: 4px 8px; font-size: 9px; }
+.sidebar-check-slot {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 32vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.sidebar .nav-row { min-width: 0; }
+.sidebar .nav-view-button { min-width: 0; line-height: 1.35; }
+.brand-name { overflow-wrap: anywhere; }
+
+/* Keyboard focus is visible in every theme, without adding a second painted
+   text layer to the semantic editor. */
+:is(button, a[href], summary, input, select, textarea):not(.semantic-editor):focus-visible {
+  outline: 2px solid var(--ui-focus);
+  outline-offset: 2px;
+}
+.nav-view-button:focus-visible,
+.theme-choice:focus-visible,
+.html-file:focus-visible,
+.source-file:focus-visible,
+.director-shot:focus-visible,
+.review-video-item:focus-visible {
+  outline-offset: -2px;
+}
+.field :is(input, select, textarea):not(.semantic-editor):focus {
+  border-color: var(--ui-focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-focus) 18%, transparent);
+}
+:is(input, textarea):not(.semantic-editor)::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+:is(input, textarea) { caret-color: var(--ink); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
+select option { color: var(--ink); background: var(--panel); }
+.button:disabled { cursor: not-allowed; }
+.modal-close {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 4px;
+  border-radius: 7px;
+}
+.modal-close:hover { color: var(--ink); background: var(--ui-hover); }
+
+/* Dialogs share a viewport bound. Long content scrolls locally so close and
+   action controls remain reachable through the dialog scrollbar. */
+.modal-overlay {
+  padding: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.modal {
+  min-width: 0;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  border-color: var(--line);
+}
+.modal:not(.builtin-template-modal) {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.modal-head { align-items: flex-start; gap: 12px; }
+.modal-head > div { min-width: 0; overflow-wrap: anywhere; }
+.modal-head h2 { line-height: 1.4; }
+.modal .form-actions { flex-wrap: wrap; }
+.modal :is(.field, .form-grid > *) { min-width: 0; }
+.batch-progress { flex-wrap: wrap; }
+.batch-progress > span { min-width: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.task-review-meta span { max-width: 100%; overflow-wrap: anywhere; }
+.membership-machine { flex-wrap: wrap; }
+.membership-machine code { min-width: 0; }
+
+/* Confirmation feedback must be visible above dialogs and the assistant. */
+#toast {
+  z-index: 120;
+  max-width: min(620px, calc(100vw - 32px));
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  text-align: center;
+}
+#modal-root .modal-overlay { z-index: 100; }
+.review-image-overlay { z-index: 110; }
+.ai-drawer:not(.open) { visibility: hidden; pointer-events: none; }
+.ai-drawer.open { visibility: visible; }
+
+/* Flex and grid children may contain a Windows path, a long title or a table.
+   Let the local component handle overflow instead of widening the whole app. */
+.card, .grid > *, .form-grid > *, .api-input-workflows > *,
+.director-diff > *, .flow-compare > *, .review-layout > * { min-width: 0; }
+.card-title { flex-wrap: wrap; }
+.card-title > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.form-actions { flex-wrap: wrap; }
+.topbar-row .project-select { min-width: 0; max-width: 100%; }
+.top-actions { min-width: 0; }
+.api-input-file strong { overflow-wrap: anywhere; }
+.api-input-file .form-actions { flex-shrink: 0; }
+.builtin-template-row { min-width: 0; flex-wrap: wrap; }
+.builtin-template-row .form-actions { margin-left: auto; }
+.asset-toolbar, .asset-filterbar { flex-wrap: wrap; }
+.asset-grid { grid-template-columns: repeat(auto-fill, minmax(min(224px, 100%), 1fr)); }
+.asset-prompt-list { grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); }
+.asset-prompt-card-head { flex-wrap: wrap; }
+.asset-prompt-card-head > div { max-width: 100%; }
+.asset-prompt-card-head p { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.asset-prompt-source { max-width: 100%; }
+.review-note-filters { flex-wrap: wrap; }
+.review-note-filters :is(input, select) { min-width: 0; max-width: 100%; }
+.review-note-filters input { flex: 1 1 200px; }
+.review-timeline { min-width: 0; flex-wrap: wrap; gap: 8px; }
+.review-timeline input { min-width: 0; }
+.review-status-table :is(th, td) { overflow-wrap: anywhere; }
+.flow-compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.flow-compare pre, .director-source { overflow-wrap: anywhere; }
+.director-reference-image img { max-width: min(200px, 100%); }
+.director-history { align-items: flex-start; flex-wrap: wrap; }
+.director-shot-list, .review-playlist {
+  top: calc(var(--director-topbar-height, 96px) + 12px);
+}
+.review-video-items {
+  max-height: min(65vh, max(120px, calc(100vh - var(--director-topbar-height, 96px) - 148px)));
+}
+
+/* Useful boundaries for small desktop windows; no changes to editor line
+   height, padding, font size, selection colour or highlight positioning. */
+@media (max-width: 1050px) {
+  .flow-compare { grid-template-columns: 1fr; }
+  .api-input-file { align-items: flex-start; flex-wrap: wrap; }
+  .api-input-file .form-actions { margin-left: auto; }
+}
+@media (max-width: 780px) {
+  .review-video-items { max-height: 230px; }
+}
+@media (max-width: 700px) {
+  .shell:not(.html-shell) .sidebar { position: static; height: auto; max-height: none; overflow: visible; }
+  .shell:not(.html-shell) .sidebar > .nav {
+    flex: none;
+    overflow: visible;
+    padding: 0;
+    margin: 0;
+  }
+  .shell:not(.html-shell) .sidebar-check-slot { max-height: 240px; }
+  .topbar-row .project-select { flex-basis: 100%; width: 100%; }
+  .top-actions { gap: 6px; justify-content: flex-start; }
+  .theme-switcher { max-width: 100%; }
+  .modal { padding: 16px; }
+  .builtin-template-modal { padding: 12px; }
+  .modal-overlay { padding: 10px; }
+  .modal { max-height: calc(100dvh - 20px); }
+  .modal-head h2 { font-size: 18px; }
+  .review-export-controls .button { margin-left: 0; }
+  .review-timeline input { flex-basis: 100%; }
+  .director-source-list > div { flex-wrap: wrap; }
+  .director-source-list .button { margin-left: auto; }
+}
+@media (max-height: 700px) and (min-width: 701px) {
+  .sidebar { padding-top: 12px; padding-bottom: 10px; }
+  .sidebar > .brand { margin-bottom: 12px; }
+  .sidebar .nav button { padding-top: 7px; padding-bottom: 7px; }
+  .sidebar-check-slot { max-height: 23vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-drawer, #toast, .asset-card { transition: none; }
+}

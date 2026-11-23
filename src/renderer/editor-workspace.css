@@ -1,0 +1,49 @@
+/* The viewport belongs to the workspace; only its document body scrolls. */
+html:has(.editor-shell), body:has(.editor-shell) { height: 100%; overflow: hidden; }
+.shell.editor-shell { height: 100dvh; min-height: 0; overflow: hidden; }
+.editor-shell > .main { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; padding-bottom: 12px; }
+.editor-shell .topbar { position: relative; flex: 0 0 auto; min-width: 0; margin-bottom: 8px; padding-bottom: 0; border-bottom: 0; }
+.editor-shell .editor-page { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; min-height: 0; width: 100%; margin: 0; }
+.editor-shell .editor-focus { display: flex; flex: 1 1 0; min-height: 0; overflow: hidden; border-radius: 10px; }
+.editor-shell .workspace-page .highlight-editor,
+.editor-shell .workspace-page .script-reader,
+.editor-shell .workspace-page .shotlist-table-reader { flex: 1 1 0; width: 100%; height: 100%; min-height: 0; max-height: none; border-radius: 10px; overscroll-behavior: contain; }
+.editor-shell .workspace-page textarea.semantic-editor,
+.editor-shell .workspace-page .highlight-layer { padding-bottom: 24px; }
+.editor-shell .workspace-page textarea.semantic-editor { overscroll-behavior: contain; }
+.editor-shell .reader-empty { min-height: 0; height: 100%; }
+
+.editor-commandbar { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.editor-command-context { display: flex; align-items: center; justify-content: space-between; gap: 6px 16px; min-width: 0; }
+.editor-command-context > p { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.editor-command-context .shotlist-duration.empty { padding: 3px 8px; border-style: solid; border-radius: 99px; text-align: left; }
+html[data-theme] .editor-command-context .editor-stats { flex-shrink: 0; min-height: 0; padding: 0; border: 0; background: transparent; font-size: 11px; white-space: nowrap; }
+html[data-theme] .editor-commandbar .folder-document-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; padding: 0; border: 0; background: transparent; }
+.editor-commandbar .folder-stage { flex-shrink: 0; }
+.editor-commandbar .folder-document-bar > select { flex: 1 1 140px; min-width: 100px; max-width: 320px; height: 30px; }
+.editor-command-actions { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; margin-left: auto; }
+.editor-commandbar .button { flex-shrink: 0; white-space: nowrap; }
+.editor-commandbar .inline-document-find { flex: 1 1 180px; min-width: 150px; max-width: 300px; }
+.editor-commandbar .inline-document-find input { min-width: 0; }
+.workspace-tab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.workspace-tab-count { min-width: 17px; padding: 1px 4px; border-radius: 9px; background: var(--panel); color: var(--red); font-size: 10px; line-height: 1.4; }
+.workspace-tab.has-unsaved-changes::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
+
+@media (max-width: 1200px) {
+  .editor-commandbar .folder-document-bar > select { flex-basis: 160px; max-width: none; }
+  .editor-command-actions { order: 1; flex-basis: 100%; justify-content: flex-start; }
+  .editor-commandbar .inline-document-find { max-width: none; }
+}
+@media (max-width: 800px) {
+  .editor-command-context { align-items: flex-start; flex-wrap: wrap; }
+  .editor-command-context .editor-stats { margin-left: auto; }
+  .editor-commandbar { padding: 7px 8px; }
+}
+@media (max-width: 700px) {
+  .shell.editor-shell { display: grid; grid-template-columns: 150px minmax(0, 1fr); }
+  .editor-shell > .sidebar { position: sticky; height: 100dvh; padding: 12px 6px; }
+  .editor-shell .sidebar .nav { display: flex; flex-direction: column; }
+  .editor-shell > .main { padding: 8px; }
+  .editor-shell .topbar { margin-bottom: 6px; }
+  .editor-shell.workspace-focus-mode { grid-template-columns: minmax(0, 1fr); }
+}

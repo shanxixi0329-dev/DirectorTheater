@@ -1,0 +1,78 @@
+.review-layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;align-items:start}.review-view .page-heading,.review-notes-view .page-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}.review-folder-path{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.review-playlist{position:sticky;top:16px;padding:16px}.review-playlist input{width:100%;margin:8px 0 12px}.review-video-items{max-height:65vh;overflow:auto}.review-video-item{display:flex;flex-direction:column;width:100%;text-align:left;gap:6px;background:transparent;color:inherit;border:1px solid transparent;border-radius:10px;padding:12px;margin:4px 0;cursor:pointer}.review-video-item span{font-size:12px;overflow-wrap:anywhere}.review-video-item small{color:var(--muted)}.review-video-item.current{background:var(--soft);border-color:var(--green)}.review-video-item.has-issues{border-left:3px solid #dc5757}.review-video-item[hidden]{display:none}.review-player-column{display:flex;flex-direction:column;gap:16px;min-width:0}.review-current-head,.review-current-head>div,.review-note-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.review-current-head h2{font-size:18px;overflow-wrap:anywhere}.review-video-stage{background:#090b0e;border-radius:12px;overflow:hidden;margin:14px 0;position:relative}.review-video-stage video{width:100%;height:clamp(260px,42vw,520px);display:block;background:#090b0e}.review-video-stage #review-play-error{position:absolute;inset:20px 20px auto;background:#3b2020;color:#ffe4e4;padding:14px;border-radius:8px}.review-timeline{display:flex;align-items:center;gap:16px;font-size:12px;font-variant-numeric:tabular-nums}.review-timeline input{flex:1}.review-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0}.review-controls label{display:flex;align-items:center;gap:8px;font-size:12px}.review-controls input[type=range]{width:105px}.review-controls input[type=number]{width:100px}.review-controls select{padding:6px;max-width:180px}.review-decision{display:flex;flex-wrap:wrap;gap:10px;border-top:1px solid var(--line);padding-top:14px}.review-note{border:1px solid var(--line);border-left:3px solid #db5757;border-radius:10px;padding:16px;margin:14px 0;background:var(--panel)}.review-note.resolved{border-left-color:#59977e}.review-note-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}.review-note-image,.review-draft-image{max-width:100%;max-height:240px;border-radius:8px;margin:12px 0;object-fit:contain}.review-note-image{cursor:zoom-in}.review-note-form .field{margin:14px 0}.review-empty{text-align:center;padding:32px 16px;color:var(--muted)}.review-note-filters{display:flex;gap:12px;margin-bottom:16px}.review-note-filters input{flex:1}.review-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#ed5c5c;margin-left:5px;vertical-align:middle;box-shadow:0 0 0 2px #ed5c5c20}.episode-rail button:has(.review-dot){border-color:#d86666;background:#d8666614}.review-image-overlay{position:fixed;inset:0;z-index:2000;background:#000d;display:flex;align-items:center;justify-content:center;padding:30px;cursor:zoom-out}.review-image-overlay img{max-width:100%;max-height:100%;object-fit:contain}.review-image-overlay button{position:absolute;top:16px;right:24px;font-size:30px;background:transparent;color:white;border:0}.review-note-head .badge.danger{color:#b33a3a;background:#b33a3a12}html[data-theme=dark] .review-note-head .badge.danger{color:#ffaaaa;background:#692c2c}html[data-theme=dark] .review-video-item.current{background:#273b34}html[data-theme=dark] .review-note{background:#20262c;border-color:#3a434d}html[data-theme=dark] .review-current-head select,html[data-theme=dark] .review-controls select{background:#1b2228;color:#e4eaf0}input[type=range]{accent-color:#608c7b}@media(max-width:1000px){.review-layout{grid-template-columns:210px minmax(0,1fr)}}@media(max-width:780px){.review-layout{grid-template-columns:1fr}.review-playlist{position:static}.review-video-items{max-height:230px}.review-view .page-heading,.review-notes-view .page-heading{align-items:flex-start;flex-direction:column}}
+
+.review-playlist input,.review-note-filters input,.review-note-filters select{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--panel);color:var(--ink);font:inherit}.review-current-head select{border:1px solid var(--line);border-radius:7px;padding:7px;background:var(--panel);color:var(--ink)}
+
+.review-status-list{margin-top:16px}.review-status-list summary{cursor:pointer;font-weight:600}.review-status-table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}.review-status-table td,.review-status-table th{text-align:left;padding:10px;border-bottom:1px solid var(--line)}
+.review-export-controls{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}.review-export-controls label{display:flex;align-items:center;gap:8px;font-size:13px}.review-export-controls select{min-width:180px;max-width:100%;padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--input-bg,var(--panel));color:var(--ink)}.review-export-controls p{flex-basis:100%;margin:0}.review-export-controls #review-export-count{margin:0}.review-export-controls .button{margin-left:auto}.review-note-filters input{min-width:0}.review-status-list{overflow:auto}
+
+/* The screening page is a video workspace: keep the player above the fold and
+   let the playlist and notes use the remaining width. The orientation marker
+   is set after metadata loads so portrait and landscape clips get different
+   presentation rules without changing playback controls. */
+.review-view { max-width: none; min-height: calc(100vh - 108px); }
+.review-view > .page-heading { margin-bottom: 7px; align-items: center; }
+.review-view > .page-heading h1 { font-size: clamp(24px, 2.3vw, 34px); }
+.review-view > .page-heading .hint { margin: 4px 0 0; }
+.review-view .review-folder-path { max-width: 100%; margin: 0 0 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-view .review-layout { grid-template-columns: minmax(208px, 242px) minmax(0, 1fr); gap: 12px; min-height: calc(100vh - 176px); align-items: stretch; }
+.review-view .review-playlist { position: sticky; top: 10px; max-height: calc(100vh - 188px); min-height: 0; display: flex; flex-direction: column; padding: 12px; }
+.review-view .review-playlist .card-title { margin-bottom: 7px; }
+.review-view .review-playlist input { margin: 5px 0 8px; }
+.review-view .review-video-items { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
+.review-view .review-player-column { min-height: 0; gap: 10px; }
+.review-view .review-player-card { min-height: 0; padding: 12px; }
+.review-view .review-current-head { margin-bottom: 2px; }
+.review-view .review-current-head h2 { max-width: min(68vw, 760px); }
+.review-view .review-video-stage { display: grid; place-items: center; width: 100%; height: min(72vh, calc(100vh - 298px), 820px); min-height: 320px; margin: 7px 0 8px; border: 1px solid #27322f; background: #070a0a; }
+.review-view .review-video-stage video { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; }
+.review-view .review-video-stage[data-orientation="portrait"] { height: min(78vh, calc(100vh - 262px), 860px); background: radial-gradient(circle at 50% 45%, #16221e, #070a0a 68%); }
+.review-view .review-video-stage[data-orientation="portrait"] video { width: auto; max-width: 100%; height: 100%; }
+.review-view .review-video-stage[data-orientation="landscape"] { background: #070a0a; }
+.review-view .review-video-stage[data-orientation="unknown"] video { max-height: 100%; }
+.review-view .review-timeline { gap: 10px; }
+.review-view .review-controls { gap: 7px; margin: 7px 0; }
+.review-view .review-controls label { min-height: 28px; }
+.review-view .review-decision { margin-top: 5px; padding-top: 9px; }
+.review-view .review-note-form { padding: 12px; }
+.review-view .review-note-form .card-title { margin-bottom: 7px; }
+html[data-theme="dark"] .review-view .review-video-stage { border-color: #33453d; box-shadow: inset 0 0 0 1px #0005; }
+html[data-theme="dark"] .review-view .review-video-stage[data-orientation="portrait"] { background: radial-gradient(circle at 50% 45%, #1a2d26, #070a0a 70%); }
+@media (max-width: 1000px) {
+  .review-view .review-layout { grid-template-columns: minmax(190px, 220px) minmax(0, 1fr); }
+  .review-view .review-video-stage { height: min(68vh, calc(100vh - 300px), 700px); }
+}
+@media (max-width: 780px) {
+  .review-view { min-height: 0; }
+  .review-view > .page-heading { margin-bottom: 10px; }
+  .review-view .review-layout { grid-template-columns: 1fr; min-height: 0; }
+  .review-view .review-playlist { position: static; max-height: 260px; }
+  .review-view .review-video-items { max-height: 180px; }
+  .review-view .review-video-stage, .review-view .review-video-stage[data-orientation="portrait"] { height: min(72vh, calc(100vh - 330px), 700px); min-height: 240px; }
+  .review-view .review-controls { margin: 5px 0; }
+}
+
+/* Stable screening workspace: keep the playlist and video controls usable together. */
+.review-workspace-heading { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; margin:0 0 8px; }
+.review-workspace-heading > strong { font-size:18px; white-space:nowrap; }
+.review-workspace-heading .review-folder-path { min-width:0; margin:0; }
+.review-view .review-layout { grid-template-columns:minmax(220px,260px) minmax(0,1fr); height:var(--review-workspace-height,calc(100vh - 180px)); min-height:420px; align-items:stretch; }
+.review-view .review-playlist { position:relative; top:auto; height:100%; max-height:none; min-height:0; overflow:hidden; }
+.review-view .review-video-items { max-height:none; min-height:0; flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.review-view .review-player-column { height:100%; min-height:0; overflow:visible; gap:10px; }
+.review-view .review-player-card { display:flex; flex-direction:column; flex:0 0 auto; min-height:0; padding:12px; overflow:visible; }
+.review-view .review-player-card > .review-current-head { order:1; }
+.review-view .review-player-card > .review-transport { order:2; }
+.review-view .review-player-card > .review-video-stage { order:3; }
+.review-view .review-transport { display:flex; flex-direction:column; gap:5px; }
+.review-view .review-transport .review-primary-controls { margin:0; padding:5px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+.review-view .review-transport .review-timeline { margin:0; }
+.review-view .review-transport .review-decision { margin:0; padding:5px 0 0; border-top:0; }
+.review-view .review-more { position:relative; }
+.review-view .review-more summary { cursor:pointer; padding:5px 8px; border:1px solid var(--line); border-radius:6px; color:var(--muted); font-size:11px; }
+.review-view .review-more > .review-controls { margin:6px 0 0; padding:6px; border:1px solid var(--line); border-radius:7px; background:var(--surface-soft,var(--soft)); }
+.review-view .review-video-stage { height:min(65vh,calc(var(--review-workspace-height,700px) - 190px),720px); min-height:260px; margin:5px 0 0; }
+.review-view .review-video-stage[data-orientation="portrait"] { height:min(70vh,calc(var(--review-workspace-height,700px) - 150px),760px); }
+.review-view .review-video-stage video { height:100%; width:100%; }
+.review-view .review-video-stage[data-orientation="portrait"] video { width:auto; max-width:100%; height:100%; }
+.review-view .review-video-item.current { scroll-margin-block:35%; }
+@media(max-width:900px){.review-workspace-heading{grid-template-columns:1fr}.review-workspace-heading .form-actions{justify-content:flex-start}.review-view .review-layout{height:auto;min-height:0;grid-template-columns:1fr}.review-view .review-playlist{height:240px}.review-view .review-video-items{max-height:170px}.review-view .review-video-stage,.review-view .review-video-stage[data-orientation="portrait"]{height:min(66vh,650px);min-height:240px}}

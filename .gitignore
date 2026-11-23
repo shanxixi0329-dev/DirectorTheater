@@ -1,0 +1,16 @@
+/node_modules/
+/installer-output/
+/outputs/
+/media-tools/
+/src/templates/
+.env
+.env.*
+*.dtlicense
+*.pem
+!src/licensing/director-theater-public.pem
+*.pfx
+*.key
+*.log
+/.ai-director/
+/director-theater-store.json*
+/membership.json

@@ -1,0 +1,176 @@
+/* Director Theater — quiet cinema surfaces and intentional feedback.
+   Never transform a workspace, editor, video, iframe, sticky container or modal.
+   Backgrounds are static: no ambient blur, shimmer, pointer follower or canvas. */
+:root {
+  --ui-accent-art: #a67b42;
+  --ui-accent-art-soft: #a67b4215;
+  --ui-ease-out: cubic-bezier(.2, .75, .25, 1);
+  --ui-motion-fast: 140ms;
+  --ui-motion-standard: 220ms;
+}
+
+:root[data-theme="dark"] {
+  --paper: #101516;
+  --panel: #1b2223;
+  --ink: #eeeae2;
+  --muted: #b9bdb6;
+  --faint: #343f3e;
+  --line: #44514e;
+  --soft: #293231;
+  --sidebar-bg: #151c1d;
+  --surface-soft: #222b2b;
+  --surface-muted: #283331;
+  --surface-hover: #303d39;
+  --input-bg: #161e1f;
+  --black: #426d5b;
+  --green: #93c9aa;
+  --ui-accent-art: #d9bd91;
+  --ui-accent-art-soft: #d9bd911b;
+}
+
+/* A warm editorial highlight and a cool, deep frame add depth without reducing
+   text contrast or moving the surface while the user works. */
+:root[data-theme="dark"] body {
+  background-color: var(--paper);
+  background-image: radial-gradient(ellipse at 88% 0, #c29b5810 0, transparent 52%),
+    linear-gradient(125deg, #101516 0, #111918 58%, #101516 100%);
+}
+:root[data-theme="dark"] .sidebar {
+  background-color: var(--sidebar-bg);
+  background-image: linear-gradient(155deg, #d9bd9109, transparent 35%),
+    linear-gradient(180deg, #192122, #141b1c);
+  border-right-color: #51645b70;
+}
+:root[data-theme="dark"] .topbar {
+  background: var(--paper);
+  box-shadow: 0 1px 0 #d9bd911a;
+}
+:root[data-theme="dark"] .brand-subtitle,
+:root[data-theme="dark"] .eyebrow {
+  color: var(--ui-accent-art);
+}
+:root[data-theme="dark"] .brand-name { color: #f0e9de; }
+:root[data-theme="dark"] .nav-row.active {
+  background: linear-gradient(105deg, #426d5b, #324b42);
+  box-shadow: inset 2px 0 0 var(--ui-accent-art), inset 0 1px 0 #ffffff0b;
+}
+:root[data-theme="dark"] .nav button:hover { background-color: #d9bd910b; }
+:root[data-theme="dark"] .nav-row.active .nav-view-button:hover {
+  background: transparent;
+}
+:root[data-theme="dark"] :is(.card, .project-entry, .assistant-dock, .assistant-panel) {
+  background-color: var(--panel);
+  background-image: linear-gradient(150deg, #d9bd9106, transparent 45%);
+  box-shadow: inset 0 1px 0 #fff9ec09;
+}
+:root[data-theme="dark"] .assistant-panel {
+  box-shadow: inset 0 1px 0 #fff9ec0c, 0 16px 48px #0006;
+}
+:root[data-theme="dark"] .card-title { color: #e9e7de; }
+:root[data-theme="dark"] .assistant-chat-message strong { color: var(--green); }
+:root[data-theme="dark"] :is(.rules-toolbar, .asset-toolbar, .director-toolbar) {
+  border-bottom-color: #d9bd912b;
+}
+:root[data-theme="dark"] .project-select { border-bottom-color: #d9bd9180; }
+:root[data-theme="dark"] .episode-rail button.current {
+  background: #426d5b;
+  box-shadow: inset 0 -2px 0 #d9bd9170;
+}
+:root[data-theme="dark"] .button:not(.secondary):not(.quiet):not(.danger):not(:disabled) {
+  background-color: #426d5b;
+  border-color: #638874;
+}
+:root[data-theme="dark"] .button:not(.secondary):not(.quiet):not(.danger):not(:disabled):hover {
+  background-color: #527d69;
+  border-color: #9bb29e;
+}
+:root[data-theme="dark"] :is(.button.secondary, .theme-switcher, .membership-chip) {
+  box-shadow: inset 0 1px 0 #fff9ec07;
+}
+:root[data-theme="dark"] .button.secondary:not(:disabled):hover {
+  border-color: #d9bd9180;
+}
+:root[data-theme="dark"] :is(.source-file.current, .html-file.current, .director-shot.current) {
+  box-shadow: inset 2px 0 0 #d9bd9170;
+}
+.project-entry:hover, .project-entry:focus-visible { transform: none; }
+.project-entry:focus-visible { outline: 2px solid var(--ui-accent-art); outline-offset: 2px; }
+
+/* Controls communicate hover/press/selection. Transition only painted colours
+   and a local button transform; dimensions, text and scroll are never animated. */
+:root[data-ui-motion="full"] :is(
+  .button, .nav-view-button, .theme-choice, .episode-rail button,
+  .source-file, .html-file, .director-shot, .review-video-item,
+  .asset-filter, .workflow-stage, .project-entry, .document-format-select,
+  .membership-chip, .assistant-tabs button, .assistant-close
+) {
+  transition-property: background-color, border-color, color, opacity;
+  transition-duration: var(--ui-motion-fast);
+  transition-timing-function: var(--ui-ease-out);
+}
+:root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close) {
+  transition-property: background-color, border-color, color, opacity, transform;
+}
+:root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close):not(:disabled):active {
+  transform: translateY(1px);
+}
+:root[data-ui-motion="full"] :is(.project-entry, .workflow-stage):not(:disabled):hover {
+  border-color: var(--ui-accent-art);
+}
+:root[data-ui-motion="full"] :is(.source-file, .html-file, .director-shot, .review-video-item):focus-visible {
+  outline-color: var(--ui-accent-art);
+}
+
+/* Page entries are marked by ui-motion.js only when navigation truly changes.
+   Saving, status polling, modal updates and editor tab refreshes do not replay. */
+:root[data-ui-motion="full"] .ui-motion-page-entry {
+  animation: ui-motion-page-reveal var(--ui-motion-standard) var(--ui-ease-out) 1;
+}
+:root[data-ui-motion="full"] .ui-motion-nav-entry {
+  animation: ui-motion-nav-reveal 180ms var(--ui-ease-out) 1;
+}
+:root[data-ui-motion="full"] .ui-motion-modal-entry {
+  animation: ui-motion-modal-reveal 160ms var(--ui-ease-out) 1;
+}
+@keyframes ui-motion-page-reveal { from { opacity: .45; } to { opacity: 1; } }
+@keyframes ui-motion-nav-reveal { from { opacity: .6; } to { opacity: 1; } }
+@keyframes ui-motion-modal-reveal { from { opacity: .6; } to { opacity: 1; } }
+
+/* Reduced retains quick colour feedback, with no displacement or entrance.
+   Off is global to interface effects including the pre-existing drawer/toast;
+   video playback is never paused or modified by this setting. */
+:root[data-ui-motion="reduced"] :is(
+  .button, .nav-view-button, .theme-choice, .episode-rail button,
+  .source-file, .html-file, .director-shot, .review-video-item,
+  .asset-filter, .workflow-stage, .project-entry, .membership-chip,
+  .assistant-tabs button, .assistant-close
+) {
+  transition-property: background-color, border-color, color;
+  transition-duration: 80ms;
+  transition-timing-function: ease-out;
+}
+:root[data-ui-motion="reduced"] :is(.ai-drawer, #toast, .asset-card) { transition: none; }
+:root[data-ui-motion="off"] :is(
+  .button, .nav-view-button, .theme-choice, .episode-rail button,
+  .source-file, .html-file, .director-shot, .review-video-item,
+  .asset-filter, .workflow-stage, .project-entry, .document-format-select,
+  .membership-chip, .assistant-tabs button, .assistant-close,
+  .ai-drawer, #toast, .asset-card
+) { transition: none !important; }
+:root[data-ui-motion="off"] .sidebar-resizer::after { transition: none !important; }
+:root:not([data-ui-motion="full"]) :is(.ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry) {
+  animation: none !important;
+}
+:root[data-ui-motion="off"] .assistant-dock img { animation: none !important; }
+:root[data-ui-motion-paused="true"] :is(.ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry) {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry { animation: none !important; }
+  :root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close):active {
+    transform: none;
+  }
+}
+
+/* The original generated flat tile is cropped only by its display frame. */
+.brand-mark img { border-radius: 22%; object-fit: contain; }

@@ -1,0 +1,80 @@
+/* Workspace controls only. Keep the shared editor/mirror metrics identical. */
+:root:not([data-theme="dark"]):not([data-theme="morandi"]) { --muted: #62665e; }
+.sidebar { padding: 18px 12px 12px; }
+.sidebar .brand { margin-bottom: 16px; }
+.nav-group-label { padding: 14px 11px 5px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.nav-group-label:first-child { padding-top: 2px; }
+.sidebar .nav { gap: 2px; }
+.sidebar .nav-view-button { min-height: 35px; padding: 8px 11px; font-size: 13px; }
+.sidebar .html-child .nav-view-button { font-size: 12px; }
+.sidebar .nav-row.active { box-shadow: inset 3px 0 var(--green); }
+.sidebar .nav-view-button[aria-current="page"] { font-weight: 700; }
+.brand-subtitle, .sidebar-foot, .sidebar .assistant-dock-status { font-size: 11px; }
+.sidebar .assistant-dock-copy { font-size: 11px; }
+.topbar-row { flex-wrap: wrap; gap: 10px 16px; }
+.topbar-row .project-select { flex: 1 1 190px; width: auto; min-width: 150px; max-width: 430px; font-size: 14px; text-overflow: ellipsis; }
+.top-actions { flex-wrap: wrap; gap: 7px; }
+.button.small, .membership-chip, .theme-choice { min-height: 30px; font-size: 12px; }
+.theme-choice { padding: 5px 8px; }
+.topbar { border-bottom: 1px solid var(--faint); }
+.workspace-save-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.workspace-save-status::before { content: ''; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.workspace-save-status.unsaved, .workspace-save-status.saving { color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.workspace-save-status.error { color: var(--red); background: color-mix(in srgb, var(--red) 9%, transparent); }
+.editor-tab.has-unsaved-changes::after { content: ''; width: 6px; height: 6px; margin-left: 7px; background: var(--amber); border-radius: 50%; }
+.editor-toolbar { flex-wrap: wrap; align-items: center; }
+.editor-toolbar > p { min-width: 0; line-height: 1.6; font-size: 12px; }
+.editor-toolbar > div { row-gap: 7px; }
+.editor-toolbar .inline-document-find { flex: 1 1 180px; max-width: 320px; }
+.folder-document-bar { gap: 9px; padding: 8px 11px; }
+.folder-document-bar select { min-width: 0; font-size: 12px; }
+.folder-stage { font-size: 11px; }
+.inline-document-find input { font-size: 12px; }
+.storyboard-check-short, .storyboard-check-heading .badge, .check-content, .check-details { font-size: 12px; }
+.check.info .check-color { background: var(--muted); }
+.storyboard-check-pin.info, .storyboard-check-pin.pending { border-color: var(--line); background: var(--panel); }
+.badge.info, .badge.pending { color: var(--muted); background: var(--soft); border-color: var(--line); }
+.reader-empty { gap: 12px; padding: 32px; text-align: center; line-height: 1.8; }
+.reader-empty strong { display: block; color: var(--ink); font-size: 20px; }
+.reader-empty p { margin: 4px 0 16px; color: var(--muted); font-size: 13px; }
+.reader-empty .form-actions { justify-content: center; }
+.store-recovery-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 14px 20px; padding: 14px 16px; border: 1px solid var(--amber); border-radius: 10px; background: color-mix(in srgb, var(--amber) 7%, var(--panel)); font-size: 13px; line-height: 1.7; }
+.store-recovery-notice > span { flex: 1 1 300px; }
+.store-recovery-notice details { flex-basis: 100%; order: 2; }
+.store-recovery-notice code { overflow-wrap: anywhere; }
+.modal:focus { outline: none; }
+.modal .field label { font-size: 13px; }
+.recent-projects button:disabled { opacity: .65; cursor: not-allowed; }
+.project-switch-status { display: flex; align-items: center; gap: 9px; padding: 9px 4px 2px; color: var(--green); font-size: 13px; }
+.project-switch-status[hidden] { display: none; }
+.project-switch-status::before { content: ''; width: 13px; height: 13px; border: 2px solid var(--line); border-top-color: var(--green); border-radius: 50%; animation: project-switch-spin .8s linear infinite; }
+@keyframes project-switch-spin { to { transform: rotate(360deg); } }
+.project-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.project-history-heading h3 { margin: 0; }
+.project-history .project-history-heading button { display: inline-flex; width: auto; padding: 6px 10px; white-space: nowrap; }
+.project-history .hint { margin: 0; font-size: 12px; line-height: 1.7; }
+.project-history-tools input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--panel); font-size: 13px; }
+#recent-project-rows { display: grid; gap: 8px; }
+.project-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.project-history .history-open { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; border: 0; border-radius: 0; padding: 11px 12px; min-width: 0; }
+.project-history .history-open strong { overflow-wrap: anywhere; font-size: 13px; }
+.project-history .history-open small { margin-left: 8px; font-size: 11px; color: var(--green); font-weight: 400; }
+.project-history .history-remove { display: inline-flex; width: auto; margin-right: 8px; padding: 7px 9px; white-space: nowrap; font-size: 12px; color: var(--red); }
+.project-history-empty { color: var(--muted); font-size: 13px; line-height: 1.8; padding: 12px 4px; }
+@media (prefers-reduced-motion: reduce) { .project-switch-status::before { animation: none; } }
+@media (max-width: 1200px) {
+  .topbar-row .project-select { flex-basis: 100%; max-width: none; }
+  .top-actions { width: 100%; }
+  .editor-toolbar > div { justify-content: flex-start; }
+}
+@media (max-width: 800px) {
+  .topbar-row { gap: 8px; }
+  .top-actions .membership-chip { display: none; }
+  .editor-toolbar .inline-document-find { max-width: none; }
+}
+@media (max-height: 750px) and (min-width: 701px) {
+  .sidebar .assistant-dock { margin-bottom: 3px; }
+  .sidebar .assistant-dock img, .sidebar .assistant-dock .assistant-avatar { width: 46px; height: 52px; }
+  .nav-group-label { padding-top: 10px; }
+  .sidebar .nav-view-button { min-height: 31px; padding-top: 6px; padding-bottom: 6px; }
+}

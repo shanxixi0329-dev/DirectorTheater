@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      try {
+        const savedTheme = localStorage.getItem('director-ui-theme');
+        document.documentElement.dataset.theme = ['light', 'dark', 'morandi'].includes(savedTheme) ? savedTheme : 'light';
+      } catch { document.documentElement.dataset.theme = 'light'; }
+    </script>
+    <link rel="icon" href="../assets/brand-v008/logo.png" type="image/png" />
+    <title>导演台剧场 V0.1.12</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="production.css" />
+    <link rel="stylesheet" href="review.css" />
+    <link rel="stylesheet" href="automation.css" />
+    <link rel="stylesheet" href="html-library.css" />
+    <link rel="stylesheet" href="director.css" />
+    <link rel="stylesheet" href="assistant.css" />
+    <link rel="stylesheet" href="ui-polish.css" />
+    <link rel="stylesheet" href="ui-motion.css" />
+    <link rel="stylesheet" href="workspace-ui.css" />
+    <link rel="stylesheet" href="workspace-windows.css" />
+    <link rel="stylesheet" href="usability.css" />
+    <link rel="stylesheet" href="editor-workspace.css" />
+  </head>
+  <body>
+    <div id="startup-splash" class="startup-splash" aria-hidden="true">
+      <div class="startup-splash-inner">
+        <div class="startup-splash-mark"><img src="../assets/brand-v008/logo-display.png" alt="" /></div>
+        <div class="startup-splash-name">导演台剧场</div>
+        <div class="startup-splash-subtitle">DIRECTOR THEATER</div>
+        <div class="startup-splash-rule" aria-hidden="true"><span></span></div>
+      </div>
+    </div>
+    <div id="app"></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <div id="modal-root"></div>
+    <script src="ui-motion.js"></script>
+    <script src="../episode-slots.js"></script>
+    <script src="../episode-read-context.js"></script>
+    <script src="shotlist-duration.js"></script>
+    <script src="editor-formatting.js"></script>
+    <script src="composition-mirror.js"></script>
+    <script src="editor-stats.js"></script>
+    <script src="save-queue.js"></script>
+    <script src="dialog-accessibility.js"></script>
+    <script src="confirm-dialog.js"></script>
+    <script src="../local-check-policy.js"></script>
+    <script src="production-ui.js"></script>
+    <script src="production-workbench.js"></script>
+    <script src="ai-panel.js"></script>
+    <script src="review-ui.js"></script>
+    <script src="automation-ui.js"></script>
+    <script src="html-library-ui.js"></script>
+    <script src="../director-core.js"></script>
+    <script src="director-ui.js"></script>
+    <script src="../assistant-core.js"></script>
+    <script src="assistant-ui.js"></script>
+    <script src="workspace-windows-ui.js"></script>
+    <script src="usability.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
+

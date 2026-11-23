@@ -1,0 +1,68 @@
+{
+  "name": "director-theater",
+  "version": "0.1.12",
+  "description": "导演台剧场 - 带会员机制的本地剧本、分镜、提示词与素材工作台",
+  "main": "src/main.js",
+  "build": {
+    "appId": "com.director.theater",
+    "productName": "导演台剧场",
+    "directories": {
+      "output": "installer-output"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!src/**/*.dtlicense",
+      "!src/templates/**"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/chrome-devtools-mcp",
+        "to": "chrome-devtools-mcp",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "src/assets/brand-v008/app-icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "DirectorTheater-Setup-${version}-win-x64.${ext}"
+    }
+  },
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/membership-core.js && node --check src/membership-service.js && node --check src/template-library.js && node --check src/ai-core.js && node --check src/api-integration.js && node --check src/pair-pipeline.js && node --check src/project-agent.js && node --check src/renderer/ai-panel.js && node --check src/renderer/app.js && node --check src/review-service.js && node --check src/review-export.js && node --check src/renderer/review-ui.js && node --check src/workflow-files.js && node --check src/quality-service.js && node --check src/automation-service.js && node --check src/renderer/automation-ui.js && node --check src/html-library.js && node --check src/renderer/html-library-ui.js && node --check src/director-core.js && node --check src/director-service.js && node --check src/renderer/director-ui.js && node --check src/assistant-core.js && node --check src/assistant-service.js && node --check src/renderer/assistant-ui.js && node --check src/renderer/ui-motion.js && node --check src/renderer/editor-formatting.js && node --check src/renderer/editor-stats.js && node --check src/project-store.js && node --check src/renderer/save-queue.js && node --check src/renderer/dialog-accessibility.js && node --check src/project-session-cache.js && node --check src/episode-file-index.js && node --check src/project-write-queue.js && node --check src/renderer/composition-mirror.js && node --check src/workspace-sync.js && node --check src/workspace-service.js && node --check src/workspace-windows.js && node --check src/renderer/workspace-windows-ui.js",
+    "package:win": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "electron": "43.2.0",
+    "undici-types": "^7.16.0",
+    "electron-builder": "26.18.0"
+  },
+  "dependencies": {
+    "chrome-devtools-mcp": "1.7.0",
+    "docx": "^9.5.1",
+    "mammoth": "^1.9.0"
+  },
+  "private": true,
+  "author": "shanxixi0329-dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shanxixi0329-dev/DirectorTheater.git"
+  }
+}

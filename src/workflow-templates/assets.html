@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="角色、场景、道具资产提示词逐集可视化">
+  <title>__PAGE_TITLE__</title>
+  <style>
+    :root {
+      --paper: #f4f0e8;
+      --paper-2: #fbf8f2;
+      --ink: #25241f;
+      --muted: #736f64;
+      --line: #d7d0c2;
+      --line-strong: #aca394;
+      --red: #9f3d31;
+      --red-soft: #f0ded8;
+      --jade: #2e685a;
+      --jade-soft: #dce9e4;
+      --blue: #466b85;
+      --blue-soft: #dfe9ef;
+      --shadow: 0 12px 40px rgba(53, 45, 32, .09);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }
+    body { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 104px minmax(520px, 1fr) 390px; grid-template-rows: auto 1fr; }
+    .topbar { grid-column: 1 / -1; min-height: 82px; padding: 16px 22px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); background: rgba(251, 248, 242, .9); position: sticky; top: 0; z-index: 30; backdrop-filter: blur(14px); }
+    .brand { min-width: 0; }
+    .eyebrow { margin: 0 0 4px; color: var(--red); font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+    h1 { margin: 0; font-family: "SimSun", "Songti SC", serif; font-size: clamp(20px, 2vw, 30px); font-weight: 800; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .top-actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+    .ghost-btn, .filter-btn, .copy-btn { border: 1px solid var(--line); background: var(--paper-2); border-radius: 999px; padding: 9px 13px; cursor: pointer; transition: .18s ease; }
+    .ghost-btn:hover, .filter-btn:hover, .copy-btn:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+    .episode-rail { grid-row: 2; background: #ebe5da; border-right: 1px solid var(--line); padding: 14px 10px 22px; overflow: auto; height: calc(100vh - 82px); position: sticky; top: 82px; }
+    .rail-label { text-align: center; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .14em; margin: 2px 0 10px; }
+    .episode-list { display: grid; gap: 7px; }
+    .episode-btn { position: relative; width: 100%; min-height: 44px; border: 1px solid transparent; background: transparent; border-radius: 12px; cursor: pointer; display: grid; place-items: center; font-weight: 800; color: #5e5a50; transition: .16s ease; }
+    .episode-btn:hover { background: rgba(255,255,255,.6); }
+    .episode-btn.active { background: var(--ink); color: white; box-shadow: 0 5px 16px rgba(37,36,31,.18); }
+    .episode-btn.has-selection::after { content: ""; position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--red); bottom: 5px; }
+    .workspace { grid-row: 2; min-width: 0; height: calc(100vh - 82px); overflow: auto; padding: 20px 22px 48px; }
+    .workspace-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+    .episode-title { display: flex; align-items: baseline; gap: 11px; }
+    .episode-title strong { font-family: "SimSun", "Songti SC", serif; font-size: 32px; }
+    .episode-title span { color: var(--muted); font-size: 13px; }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .stat { background: var(--paper-2); border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; font-size: 12px; }
+    .stat b { margin-right: 4px; }
+    .tools { min-width: min(390px, 45%); }
+    .search { width: 100%; border: 1px solid var(--line); background: var(--paper-2); border-radius: 13px; padding: 11px 14px; outline: none; color: var(--ink); }
+    .search:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba(159,61,49,.1); }
+    .filters { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; margin-top: 8px; }
+    .filter-btn { padding: 6px 10px; font-size: 12px; }
+    .filter-btn[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
+    .map-note { display: flex; align-items: center; gap: 9px; padding: 10px 13px; margin-bottom: 14px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); font-size: 12px; background: rgba(251,248,242,.55); }
+    .map-note::before { content: "※"; color: var(--red); font-weight: 900; }
+    .asset-map { position: relative; min-height: 520px; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 18px; align-items: start; padding: 24px 0; }
+    .asset-map::before, .asset-map::after { content: ""; position: absolute; top: 49px; height: 1px; background: var(--line-strong); z-index: 0; }
+    .asset-map::before { left: 29%; width: 21%; }
+    .asset-map::after { right: 29%; width: 21%; }
+    .lane { position: relative; z-index: 1; min-width: 0; }
+    .lane-head { min-height: 52px; border: 1px solid var(--line-strong); background: var(--paper-2); box-shadow: var(--shadow); border-radius: 15px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 13px; margin-bottom: 14px; }
+    .lane-head h2 { margin: 0; font-family: "SimSun", "Songti SC", serif; font-size: 18px; }
+    .lane-head span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: white; font-size: 12px; font-weight: 800; }
+    .lane.character .lane-head span { background: var(--red); }
+    .lane.scene .lane-head span { background: var(--jade); }
+    .lane.prop .lane-head span { background: var(--blue); }
+    .lane-body { position: relative; display: grid; gap: 10px; }
+    .lane-body::before { content: ""; position: absolute; width: 1px; top: -14px; bottom: 18px; left: 50%; background: var(--line); z-index: -1; }
+    .asset-card { width: 100%; text-align: left; border: 1px solid var(--line); background: rgba(251,248,242,.96); border-radius: 13px; padding: 12px 12px 11px; cursor: pointer; box-shadow: 0 4px 14px rgba(53,45,32,.04); transition: .17s ease; }
+    .asset-card:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: 0 9px 23px rgba(53,45,32,.09); }
+    .asset-card.active { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+    .asset-name { display: block; font-size: 14px; font-weight: 800; line-height: 1.42; }
+    .asset-meta { display: flex; flex-wrap:wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 7px; color: var(--muted); font-size: 11px; }
+    .variant-chip { padding: 3px 7px; border-radius: 999px; font-weight: 800; white-space: nowrap; }
+    .character .variant-chip { color: var(--red); background: var(--red-soft); }
+    .scene .variant-chip { color: var(--jade); background: var(--jade-soft); }
+    .prop .variant-chip { color: var(--blue); background: var(--blue-soft); }
+    .empty-lane { padding: 24px 12px; border: 1px dashed var(--line); border-radius: 13px; text-align: center; color: var(--muted); font-size: 12px; background: rgba(251,248,242,.35); }
+    .detail { grid-row: 2; height: calc(100vh - 82px); overflow: auto; position: sticky; top: 82px; border-left: 1px solid var(--line); background: var(--paper-2); padding: 20px 20px 42px; }
+    .detail-kicker { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+    .detail-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); }
+    .detail h2 { margin: 12px 0 7px; font-family: "SimSun", "Songti SC", serif; font-size: 25px; line-height: 1.3; }
+    .detail-occurrence { color: var(--muted); font-size: 12px; line-height: 1.65; }
+    .detail-empty { min-height: 60vh; display: grid; place-items: center; text-align: center; color: var(--muted); }
+    .detail-empty-mark { margin: 0 auto 16px; width: 68px; height: 68px; border: 1px dashed var(--line-strong); border-radius: 50%; display: grid; place-items: center; font-family: serif; font-size: 30px; }
+    .variant-block { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 17px; }
+    .variant-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .variant-heading h3 { margin: 0; font-size: 15px; line-height: 1.45; }
+    .variant-app { margin: 6px 0 11px; color: var(--muted); font-size: 12px; }
+    .prompt { margin: 0; white-space: pre-wrap; font-family: "Microsoft YaHei", sans-serif; font-size: 13px; line-height: 1.82; color: #34322d; background: #f1ece3; border-radius: 12px; padding: 13px; }
+    .copy-btn { padding: 6px 9px; font-size: 11px; white-space: nowrap; }
+    .copy-btn.done { background: var(--jade); border-color: var(--jade); color: white; }
+    .source-tag { margin-top: 18px; color: var(--muted); font-size: 11px; }
+    dialog { width: min(720px, calc(100vw - 32px)); max-height: min(780px, calc(100vh - 32px)); border: 1px solid var(--line); border-radius: 18px; background: var(--paper-2); color: var(--ink); padding: 0; box-shadow: 0 24px 80px rgba(0,0,0,.2); }
+    dialog::backdrop { background: rgba(29,27,23,.45); backdrop-filter: blur(3px); }
+    .dialog-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line); background: var(--paper-2); }
+    .dialog-head h2 { margin: 0; font-family: "SimSun", serif; }
+    .dialog-body { padding: 3px 20px 24px; }
+    .source-note { padding: 16px 0; border-bottom: 1px solid var(--line); }
+    .source-note h3 { margin: 0 0 9px; font-size: 15px; }
+    .source-note p { margin: 5px 0; color: #4f4b43; font-size: 13px; line-height: 1.65; }
+    .source-summary { color: var(--muted); font-size: 12px; }
+    .mobile-detail-close { display: none; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (max-width: 1120px) {
+      .app { grid-template-columns: 92px minmax(500px, 1fr) 330px; }
+      .asset-map { gap: 22px; }
+    }
+    @media (max-width: 880px) {
+      .app { display: block; }
+      .topbar { position: sticky; min-height: 72px; padding: 12px 14px; }
+      .top-actions .source-label { display: none; }
+      .episode-rail { position: sticky; top: 72px; z-index: 25; height: auto; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .rail-label { display: none; }
+      .episode-list { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: thin; }
+      .episode-btn { flex: 0 0 48px; min-height: 38px; }
+      .workspace { height: auto; overflow: visible; padding: 16px 14px 100px; }
+      .detail { display: none; position: fixed; z-index: 50; inset: 72px 0 0; height: auto; border-left: 0; padding: 18px 18px 44px; }
+      .detail.open { display: block; }
+      .mobile-detail-close { display: inline-flex; position: sticky; top: 0; float: right; z-index: 2; }
+    }
+    @media (max-width: 640px) {
+      h1 { font-size: 17px; }
+      .topbar { gap: 10px; }
+      .workspace-head { display: block; }
+      .tools { min-width: 0; margin-top: 13px; }
+      .filters { justify-content: flex-start; }
+      .asset-map { grid-template-columns: 1fr; gap: 20px; padding-top: 8px; }
+      .asset-map::before, .asset-map::after { display: none; }
+      .lane-body::before { left: 18px; }
+      .lane.scene { order: -1; }
+      .lane-head { position: sticky; top: 129px; z-index: 5; }
+    }
+    :root[data-director-theme="dark"] {color-scheme:dark;--paper:#141817;--paper-2:#1c2220;--ink:#eef2ee;--muted:#b0b9b3;--line:#445149;--line-strong:#63796c;--red:#e3a194;--red-soft:#422d29;--jade:#89c6a9;--jade-soft:#244536;--blue:#a1c4df;--blue-soft:#263e4c;--shadow:0 8px 24px #0004}
+    [data-director-theme="dark"] .topbar,[data-director-theme="dark"] .episode-rail,[data-director-theme="dark"] .asset-card,[data-director-theme="dark"] .empty-lane,[data-director-theme="dark"] .map-note{background:var(--paper-2)}
+    [data-director-theme="dark"] .episode-btn,[data-director-theme="dark"] .prompt,[data-director-theme="dark"] .source-note p{color:var(--ink)}
+    [data-director-theme="dark"] .episode-btn.active{background:var(--jade-soft);color:var(--ink)}
+    [data-director-theme="dark"] .prompt{background:#101513}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <p class="eyebrow">ASSET ATLAS · __EPISODE_RANGE__</p>
+        <h1>__DISPLAY_TITLE__</h1>
+      </div>
+      <div class="top-actions">
+        <button class="ghost-btn" id="openNotes" type="button"><span class="source-label">数据</span>说明</button>
+      </div>
+    </header>
+
+    <nav class="episode-rail" aria-label="集数选择">
+      <div class="rail-label">集数</div>
+      <div class="episode-list" id="episodeList"></div>
+    </nav>
+
+    <main class="workspace">
+      <div class="workspace-head">
+        <div>
+          <div class="episode-title"><strong id="episodeHeading">第1集</strong><span>对应资产</span></div>
+          <div class="stats" id="stats"></div>
+        </div>
+        <div class="tools">
+          <label class="sr-only" for="searchInput">搜索当前集资产</label>
+          <input class="search" id="searchInput" type="search" placeholder="搜索资产名、造型或提示词…" autocomplete="off">
+          <div class="filters" id="filters"></div>
+        </div>
+      </div>
+      <div class="map-note">连线表示资产在当前集共现；原文件未提供角色、场景、道具的逐场归属，因此不额外虚构关联。
+      </div>
+      <section class="asset-map" id="assetMap" aria-live="polite"></section>
+    </main>
+
+    <aside class="detail" id="detail" aria-label="资产信息栏">
+      <button class="ghost-btn mobile-detail-close" id="closeDetail" type="button">返回资产图</button>
+      <div id="detailContent"></div>
+    </aside>
+  </div>
+
+  <dialog id="notesDialog">
+    <div class="dialog-head">
+      <h2>数据说明</h2>
+      <button class="ghost-btn" id="closeNotes" type="button">关闭</button>
+    </div>
+    <div class="dialog-body" id="notesContent"></div>
+  </dialog>
+
+  <script id="assetData" type="application/json">__ASSET_DATA__</script>
+  <script>
+    document.documentElement.dataset.directorTheme=new URLSearchParams(location.search).get('directorTheme')||'light';
+    window.addEventListener('message',event=>{if(event.source===parent&&event.data?.type==='director-theme')document.documentElement.dataset.directorTheme=event.data.theme;});
+    const DATA = JSON.parse(document.getElementById('assetData').textContent);
+    const storageKey = 'asset-atlas-episode:' + DATA.title;
+    let savedEpisode = 1;
+    try { savedEpisode = Number(localStorage.getItem(storageKey)) || 1; } catch {}
+    if (savedEpisode < 1 || savedEpisode > DATA.episodeCount) savedEpisode = 1;
+    const typeOrder = ['character', 'scene', 'prop'];
+    const typeMeta = {
+      character: { label: '角色', hint: '人物' },
+      scene: { label: '场景', hint: '地点' },
+      prop: { label: '道具', hint: '物件' }
+    };
+    const state = {
+      episode: savedEpisode,
+      search: '',
+      visibleTypes: new Set(typeOrder),
+      selectedId: null
+    };
+
+    const el = {
+      episodeList: document.getElementById('episodeList'),
+      episodeHeading: document.getElementById('episodeHeading'),
+      stats: document.getElementById('stats'),
+      search: document.getElementById('searchInput'),
+      filters: document.getElementById('filters'),
+      map: document.getElementById('assetMap'),
+      detail: document.getElementById('detail'),
+      detailContent: document.getElementById('detailContent'),
+      notesDialog: document.getElementById('notesDialog'),
+      notesContent: document.getElementById('notesContent')
+    };
+
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+    }
+
+    function variantsForEpisode(asset, episode) {
+      const matching = asset.variants.filter((variant) => variant.episodes.includes(episode));
+      return matching.length ? matching : asset.variants;
+    }
+
+    function episodeAssets(type) {
+      const query = state.search.trim().toLowerCase();
+      return DATA.assets.filter((asset) => {
+        if (asset.type !== type || !asset.episodes.includes(state.episode)) return false;
+        if (!query) return true;
+        const haystack = [asset.name, asset.occurrenceText, ...asset.variants.flatMap((variant) => [variant.name, variant.applicability, variant.prompt])].join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+
+    function renderEpisodes() {
+      el.episodeList.innerHTML = Array.from({ length: DATA.episodeCount }, (_, index) => {
+        const episode = index + 1;
+        const selected = DATA.assets.some((asset) => asset.id === state.selectedId && asset.episodes.includes(episode));
+        return '<button type="button" class="episode-btn' + (episode === state.episode ? ' active' : '') + (selected ? ' has-selection' : '') + '" data-episode="' + episode + '" aria-current="' + (episode === state.episode ? 'page' : 'false') + '">' + String(episode).padStart(2, '0') + '</button>';
+      }).join('');
+    }
+
+    function renderFilters() {
+      el.filters.innerHTML = typeOrder.map((type) => '<button type="button" class="filter-btn" data-filter="' + type + '" aria-pressed="' + state.visibleTypes.has(type) + '">' + typeMeta[type].label + '</button>').join('');
+    }
+
+    function renderMap() {
+      const grouped = Object.fromEntries(typeOrder.map((type) => [type, episodeAssets(type)]));
+      el.episodeHeading.textContent = '第' + state.episode + '集';
+      el.stats.innerHTML = typeOrder.map((type) => '<span class="stat"><b>' + grouped[type].length + '</b>' + typeMeta[type].label + '</span>').join('') + '<span class="stat"><b>' + Object.values(grouped).flat().length + '</b>资产合计</span>';
+
+      el.map.innerHTML = typeOrder.filter((type) => state.visibleTypes.has(type)).map((type) => {
+        const assets = grouped[type];
+        const cards = assets.length ? assets.map((asset) => {
+          const count = variantsForEpisode(asset, state.episode).length;
+          return '<button type="button" class="asset-card' + (asset.id === state.selectedId ? ' active' : '') + '" data-asset-id="' + asset.id + '">' +
+            '<span class="asset-name">' + esc(asset.id) + ' · ' + esc(asset.name) + '</span>' +
+            '<span class="asset-meta"><span>首现 · 第' + asset.firstEpisode + '集</span><span class="variant-chip">' + count + '个提示词</span></span>' +
+          '</button>';
+        }).join('') : '<div class="empty-lane">' + (state.search ? '没有匹配的资产' : '本集无对应资产') + '</div>';
+        return '<section class="lane ' + type + '"><div class="lane-head"><h2>' + typeMeta[type].label + '</h2><span>' + assets.length + '</span></div><div class="lane-body">' + cards + '</div></section>';
+      }).join('');
+
+      renderDetail();
+    }
+
+    function renderDetail() {
+      const asset = DATA.assets.find((item) => item.id === state.selectedId);
+      if (!asset) {
+        el.detailContent.innerHTML = '<div class="detail-empty"><div><div class="detail-empty-mark">点</div><strong>点击中间任一资产</strong><p>这里会显示对应造型与完整提示词</p></div></div>';
+        return;
+      }
+
+      const variants = variantsForEpisode(asset, state.episode);
+      const dotColor = asset.type === 'character' ? 'var(--red)' : asset.type === 'scene' ? 'var(--jade)' : 'var(--blue)';
+      el.detailContent.innerHTML =
+        '<div class="detail-kicker"><span class="detail-dot" style="background:' + dotColor + '"></span>' + esc(asset.typeLabel) + '资产 · 第' + state.episode + '集</div>' +
+        '<h2>' + esc(asset.id) + ' · ' + esc(asset.name) + '</h2>' +
+        '<div class="detail-occurrence">首次出现：第' + asset.firstEpisode + '集<br>出现：' + esc(asset.occurrenceText) + '</div>' +
+        variants.map((variant, index) => '<section class="variant-block"><div class="variant-heading"><h3>' + esc(variant.name) + '</h3><button type="button" class="copy-btn" data-copy-index="' + index + '">复制提示词</button></div><div class="variant-app">适用：' + esc(variant.applicability) + '</div><p class="prompt">' + esc(variant.prompt) + '</p></section>').join('') +
+        '<div class="source-tag">来源：' + esc(asset.sourceFile) + '</div>';
+    }
+
+    async function copyText(text, button) {
+      try {
+        let copied=false;
+        if (navigator.clipboard && window.isSecureContext) {
+          try { await navigator.clipboard.writeText(text); copied=true; } catch {}
+        }
+        if (!copied) {
+          const area = document.createElement('textarea');
+          area.value = text;
+          area.style.position = 'fixed';
+          area.style.opacity = '0';
+          document.body.appendChild(area);
+          area.select();
+          copied=document.execCommand('copy');
+          area.remove();
+        }
+        if(!copied)throw Error('请手动选择提示词复制。');
+        button.textContent = '已复制';
+        button.classList.add('done');
+        setTimeout(() => { button.textContent = '复制提示词'; button.classList.remove('done'); }, 1200);
+      } catch {
+        button.textContent = '复制失败';
+      }
+    }
+
+    function renderNotes() {
+      el.notesContent.innerHTML = DATA.sources.map((source) => '<section class="source-note"><h3>' + esc(source.label) + '资产</h3><div class="source-summary">' + source.assetCount + '个资产 · ' + source.promptCount + '条提示词 · ' + esc(source.file) + '</div>' + source.notes.map((note) => '<p>' + esc(note) + '</p>').join('') + '</section>').join('');
+    }
+
+    el.episodeList.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-episode]');
+      if (!button) return;
+      state.episode = Number(button.dataset.episode);
+      state.selectedId = null;
+      try { localStorage.setItem(storageKey, state.episode); } catch {}
+      renderEpisodes();
+      renderMap();
+      document.querySelector('.workspace').scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    el.search.addEventListener('input', () => {
+      state.search = el.search.value;
+      renderMap();
+    });
+
+    el.filters.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-filter]');
+      if (!button) return;
+      const type = button.dataset.filter;
+      if (state.visibleTypes.has(type) && state.visibleTypes.size > 1) state.visibleTypes.delete(type);
+      else state.visibleTypes.add(type);
+      renderFilters();
+      renderMap();
+    });
+
+    el.map.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-asset-id]');
+      if (!button) return;
+      state.selectedId = button.dataset.assetId;
+      renderEpisodes();
+      renderMap();
+      if (window.innerWidth <= 880) el.detail.classList.add('open');
+    });
+
+    el.detail.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-copy-index]');
+      if (!button) return;
+      const asset = DATA.assets.find((item) => item.id === state.selectedId);
+      const variant = variantsForEpisode(asset, state.episode)[Number(button.dataset.copyIndex)];
+      copyText(variant.prompt, button);
+    });
+
+    document.getElementById('closeDetail').addEventListener('click', () => el.detail.classList.remove('open'));
+    document.getElementById('openNotes').addEventListener('click', () => el.notesDialog.showModal());
+    document.getElementById('closeNotes').addEventListener('click', () => el.notesDialog.close());
+    el.notesDialog.addEventListener('click', (event) => { if (event.target === el.notesDialog) el.notesDialog.close(); });
+
+    renderEpisodes();
+    renderFilters();
+    renderMap();
+    renderNotes();
+  </script>
+</body>
+</html>
