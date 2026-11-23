@@ -44,7 +44,7 @@ npm run check
 npm start
 ```
 
-运行 `npm run package:win` 可生成 Windows 安装程序，输出位于 `installer-output/`。
+运行 `npm run package:win` 可生成本地测试用的 Windows 安装程序，输出位于 `installer-output/`。正式签名发布使用 `npm run package:win:signed`。[Windows 签名发布说明](docs/windows-release.md)
 
 ## 同步
 

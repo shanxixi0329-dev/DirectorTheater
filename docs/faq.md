@@ -4,6 +4,16 @@
 
 普通安装选带 `Setup` 的 Windows x64 `.exe`。发布页另外提供 SHA-256 校验文件和管理员签发工具。[下载页](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest)
 
+## V0.1.13 安装时为什么显示未知发布者？
+
+这一版安装程序尚未使用受信任的 Windows 代码签名证书，Windows SmartScreen 可能提示无法识别应用。[微软 SmartScreen 说明](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation)
+
+从对应的 GitHub 发布页下载安装程序和 `SHA256SUMS.txt`。在下载目录打开 PowerShell，运行以下命令，将得到的 SHA-256 与校验文件中同名安装程序那一行核对。校验值不一致时，请从发布页重新下载。[V0.1.13 发布页](https://github.com/shanxixi0329-dev/DirectorTheater/releases/tag/v0.1.13)
+
+```powershell
+Get-FileHash -Algorithm SHA256 -LiteralPath '.\DirectorTheater-Setup-0.1.13-win-x64.exe'
+```
+
 ## 从哪里开始？
 
 首次打开时，可以打开已有项目、从一份文件开始，或从空白新建。图文引导演示了如何选择集数、改稿保存和记录审片意见。[图文上手](quickstart.md)

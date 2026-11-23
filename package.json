@@ -46,7 +46,8 @@
   "scripts": {
     "start": "electron .",
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/membership-core.js && node --check src/membership-service.js && node --check src/template-library.js && node --check src/ai-core.js && node --check src/api-integration.js && node --check src/pair-pipeline.js && node --check src/project-agent.js && node --check src/renderer/ai-panel.js && node --check src/renderer/app.js && node --check src/review-service.js && node --check src/review-export.js && node --check src/renderer/review-ui.js && node --check src/workflow-files.js && node --check src/quality-service.js && node --check src/automation-service.js && node --check src/renderer/automation-ui.js && node --check src/html-library.js && node --check src/renderer/html-library-ui.js && node --check src/director-core.js && node --check src/director-service.js && node --check src/renderer/director-ui.js && node --check src/assistant-core.js && node --check src/assistant-service.js && node --check src/renderer/assistant-ui.js && node --check src/renderer/ui-motion.js && node --check src/renderer/editor-formatting.js && node --check src/renderer/editor-stats.js && node --check src/project-store.js && node --check src/renderer/save-queue.js && node --check src/renderer/dialog-accessibility.js && node --check src/project-session-cache.js && node --check src/episode-file-index.js && node --check src/project-write-queue.js && node --check src/renderer/composition-mirror.js && node --check src/workspace-sync.js && node --check src/workspace-service.js && node --check src/workspace-windows.js && node --check src/renderer/workspace-windows-ui.js",
-    "package:win": "electron-builder --win nsis --x64 --publish never"
+    "package:win": "electron-builder --win nsis --x64 --publish never",
+    "package:win:signed": "node scripts/package-win-signed.cjs"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
