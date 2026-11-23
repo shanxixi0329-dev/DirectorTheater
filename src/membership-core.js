@@ -51,11 +51,13 @@ function parseLicenseToken(token) {
 function verifyLicenseToken(token, publicKey, machineCode, at = Date.now()) {
   try {
     const parsed = parseLicenseToken(token);
-    const signatureValid = crypto.verify('sha256', Buffer.from(parsed.body), {
-      key: publicKey,
+    const keys = Array.isArray(publicKey) ? publicKey : [publicKey];
+    const body = Buffer.from(parsed.body);
+    const signatureValid = keys.some(key => crypto.verify('sha256', body, {
+      key,
       padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
       saltLength: 32
-    }, parsed.signature);
+    }, parsed.signature));
     if (!signatureValid) return { valid: false, reason: '授权签名无效。' };
     const payload = parsed.payload || {};
     const plan = PLANS[payload.plan];

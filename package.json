@@ -1,6 +1,6 @@
 {
   "name": "director-theater",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "导演台剧场 - 带会员机制的本地剧本、分镜、提示词与素材工作台",
   "main": "src/main.js",
   "build": {

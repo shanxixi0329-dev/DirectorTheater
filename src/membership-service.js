@@ -50,7 +50,7 @@ async function writeRegistryValue(name, value) {
 function createMembershipService({ app, dialog, mainWindow: getMainWindow }) {
   let statePath = '';
   let licensePath = '';
-  let publicKey = '';
+  let publicKeys = [];
   let bundledToken = '';
   let machineCode = '';
   let state = null;
@@ -90,7 +90,9 @@ function createMembershipService({ app, dialog, mainWindow: getMainWindow }) {
   async function init() {
     statePath = path.join(app.getPath('userData'), 'membership.json');
     licensePath = path.join(app.getPath('userData'), 'membership.dtlicense');
-    publicKey = await fs.readFile(path.join(__dirname, 'licensing', 'director-theater-public.pem'), 'utf8');
+    const licensingDir = path.join(__dirname, 'licensing');
+    publicKeys = await Promise.all(['director-theater-public.pem', 'director-theater-public-v013.pem']
+      .map(file => fs.readFile(path.join(licensingDir, file), 'utf8')));
     // Only permanent-edition packages contain this signed, machine-independent license.
     // A missing or invalid bundled license leaves the regular membership rules in effect.
     bundledToken = await fs.readFile(path.join(__dirname, 'licensing', 'bundled-lifetime.dtlicense'), 'utf8').then(value => value.trim()).catch(() => '');
@@ -136,12 +138,12 @@ function createMembershipService({ app, dialog, mainWindow: getMainWindow }) {
   async function status() {
     if (!state) await init();
     const token = await readToken();
-    let result = resolveMembership({ trial: state, token, publicKey, machineCode });
-    const bundledVerification = bundledToken && verifyLicenseToken(bundledToken, publicKey, machineCode);
+    let result = resolveMembership({ trial: state, token, publicKey: publicKeys, machineCode });
+    const bundledVerification = bundledToken && verifyLicenseToken(bundledToken, publicKeys, machineCode);
     if (bundledVerification?.valid && bundledVerification.plan.id === 'lifetime' && bundledVerification.payload.machineCode === '*') {
       if (!result.active || !result.permanent) {
         result = {
-          ...resolveMembership({ trial: state, token: bundledToken, publicKey, machineCode }),
+          ...resolveMembership({ trial: state, token: bundledToken, publicKey: publicKeys, machineCode }),
           source: 'bundled-license',
           priceLabel: '随安装包附带 · 永久'
         };
@@ -170,7 +172,7 @@ function createMembershipService({ app, dialog, mainWindow: getMainWindow }) {
 
   async function activateToken(token) {
     const compact = String(token || '').trim();
-    const verification = verifyLicenseToken(compact, publicKey, machineCode);
+    const verification = verifyLicenseToken(compact, publicKeys, machineCode);
     if (!verification.valid) throw new Error(verification.reason || '授权无法激活。');
     await fs.mkdir(path.dirname(licensePath), { recursive: true });
     await fs.writeFile(licensePath, compact, 'utf8');

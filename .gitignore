@@ -8,6 +8,7 @@
 *.dtlicense
 *.pem
 !src/licensing/director-theater-public.pem
+!src/licensing/director-theater-public-v013.pem
 *.pfx
 *.key
 *.log

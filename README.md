@@ -4,7 +4,7 @@
 
 改第 8 集剧本时，可以一边看原文或大纲，一边改剧本，也可以另开窗口核对分镜和提示词。样片回来后，按时间点记下要改的镜头，复审时接着看。
 
-**[下载 Windows x64 版](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest)**
+**[下载 Windows x64 版](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest)** · [图文上手](docs/quickstart.md) · [会员激活](docs/activation.md) · [常见问题](docs/faq.md)
 
 ## 截图演示
 
@@ -28,7 +28,11 @@
 2. 新建项目，或打开已有项目目录。选中一集，就可以查看该集已有的制作文件。
 3. 使用 AI 生成前，在应用内配置所需服务，并在规则页导入要求文件。制作台绑定视频时，请将 FFmpeg 的 `ffprobe` 加入系统 `PATH`。
 
-公开版提供 7 天编辑试用。试用到期后可以继续阅读项目，导入有效授权后可恢复编辑。
+公开版提供 7 天编辑试用。试用到期后可以继续阅读项目，导入有效授权后可恢复编辑。[查看会员激活步骤](docs/activation.md)
+
+## 问题反馈
+
+反馈问题时附上软件版本、Windows 版本、操作步骤和具体报错。使用演示资料截图，或先遮住项目名称、API 密钥、电脑识别码和激活码。[提交问题或建议](https://github.com/shanxixi0329-dev/DirectorTheater/issues)
 
 ## 从源码运行
 
