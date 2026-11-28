@@ -32,6 +32,19 @@ const RETRY_MAX_MS = 60000;
  * ------------------------------------------------------------------ */
 
 const PROVIDERS = {
+  magpie: {
+    label: 'Magpie 本机网关（直连 Codex / 路由组）',
+    baseUrl: 'http://127.0.0.1:3425/v1',
+    models: ['group/smart-split', 'codex/gpt-6.2-sol', 'codex/gpt-6.2-astra', 'auto/deepseek-v4.1-flash', 'deepseek/deepseek-v4-pro'],
+    modelNotes: {
+      'group/smart-split': '智能分流（推荐）',
+      'codex/gpt-6.2-sol': 'Codex GPT-6.2 Sol',
+      'codex/gpt-6.2-astra': 'Codex GPT-6.2 Astra',
+      'auto/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash'
+    },
+    supportsJsonMode: true,
+    localGateway: true
+  },
   deepseek: {
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
@@ -74,7 +87,56 @@ const PROVIDERS = {
 };
 
 function defaultProviderId() {
-  return Object.keys(PROVIDERS)[0];
+  return 'deepseek';
+}
+
+function isLocalGatewayUrl(url) {
+  try {
+    const parsed = new URL(String(url || '').trim());
+    return parsed.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function fetchGatewayModels(baseUrl = 'http://127.0.0.1:3425/v1', { apiKey = '', timeoutMs = 2500 } = {}) {
+  const clean = String(baseUrl || '').trim().replace(/\/+$/, '');
+  const endpoint = /\/v1$/i.test(clean) ? `${clean}/models` : `${clean}/v1/models`;
+  let target;
+  try { target = new URL(endpoint); } catch { return Promise.resolve({ online: false, models: [], error: '地址无效' }); }
+  const transport = target.protocol === 'https:' ? https : http;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; clearTimeout(timer); resolve(val); } };
+    const headers = { Accept: 'application/json' };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const req = transport.get({
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (target.protocol === 'https:' ? 443 : 80),
+      path: `${target.pathname}${target.search}`,
+      headers
+    }, (res) => {
+      let raw = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { raw += chunk; });
+      res.on('end', () => {
+        if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
+          return done({ online: false, models: [], error: `HTTP ${res.statusCode}` });
+        }
+        try {
+          const parsed = JSON.parse(raw);
+          const list = Array.isArray(parsed?.data) ? parsed.data : [];
+          const models = list.map(item => String(item?.id || '').trim()).filter(Boolean);
+          done({ online: true, models, error: '' });
+        } catch (err) {
+          done({ online: false, models: [], error: err.message || '响应无法解析' });
+        }
+      });
+    });
+    req.on('error', err => done({ online: false, models: [], error: err.message || '连接失败' }));
+    const timer = setTimeout(() => { req.destroy(); done({ online: false, models: [], error: '检测超时' }); }, timeoutMs);
+  });
 }
 
 /**
@@ -153,7 +215,8 @@ function configProblems(config) {
   if (!config.baseUrl) problems.push('未填写 API 地址（Base URL）。');
   else if (!/^https?:\/\/.+/i.test(config.baseUrl)) problems.push(`API 地址「${config.baseUrl}」不是合法的网址（应以 https:// 开头）。`);
   if (!config.model) problems.push('未填写模型名。');
-  if (!config.apiKey) problems.push('未填写 API Key。');
+  const allowBlankKey = config.provider === 'magpie' || isLocalGatewayUrl(config.baseUrl);
+  if (!config.apiKey && !allowBlankKey) problems.push('未填写 API Key。');
   return problems;
 }
 
@@ -295,7 +358,7 @@ function requestOnce(config, messages, options = {}) {
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': body.length,
-        Authorization: `Bearer ${config.apiKey}`,
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
         Accept: streaming ? 'text/event-stream' : 'application/json',
         'User-Agent': 'AIGC-Director-Desk/3.0'
       }
@@ -1869,6 +1932,8 @@ module.exports = {
   VALIDATION_CHECKS,
   defaultProviderId,
   defaultValidationChecks,
+  isLocalGatewayUrl,
+  fetchGatewayModels,
   repairBaseUrl,
   resolveValidationChecks,
   splitBundle,

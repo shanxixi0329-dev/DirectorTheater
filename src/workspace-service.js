@@ -47,30 +47,36 @@ function createWorkspaceService({ key, projectByPath, outputPath, readDocument, 
     if (['documents:save', 'documents:export-word'].includes(channel)) {
       const { project, kind, activePath, content } = args[1];
       const exportWord = channel === 'documents:export-word';
+      const activeIsDocx = project.documentFormats?.[kind] === 'docx';
       const targetProject = exportWord ? { ...project, documentFormats: { ...project.documentFormats, [kind]: 'docx' } } : project;
       const active = exportWord ? (activePath || '').replace(/\.(txt|md|markdown|docx)$/i, '.docx') : activePath;
       const target = outputPath(targetProject, kind, active);
       return serial(key(target), async () => {
         const known = documents.get(sender), actual = await current(target);
         const expected = Object.hasOwn(args[1], 'expectedVersion') ? args[1].expectedVersion : known?.get(key(target));
-        const explicitExport = exportWord && !known?.has(key(target));
+        const explicitExport = exportWord && (!activeIsDocx || !known?.has(key(target)));
         if (!explicitExport && actual !== null && (expected === undefined || actual !== expected) && actual !== fingerprint(content)) {
           broadcast('workspace:changed', { type: 'document', projectPath: project.projectPath, kind, path: target, episode: project.currentEpisode, version: actual });
           throw new Error('文件已被其他窗口或外部程序更新。本窗草稿已保留，请先复制草稿，再读取最新内容进行核对。');
         }
-        if (actual === null && expected != null) throw new Error('文件已被移走或删除。本窗草稿已保留，请先刷新项目核对。');
+        if (!explicitExport && actual === null && expected != null) throw new Error('文件已被移走或删除。本窗草稿已保留，请先刷新项目核对。');
         const result = await action();
-        learn(sender, result);
-        // The file guard has just verified the window's read version and
-        // committed its new text. Rebase this one content field against the
-        // current metadata so an accepted remote edit is not reported as a
-        // second, spurious metadata conflict on the following project save.
-        const base = projects.get(sender)?.get(key(project.projectPath));
-        const latest = projectByPath(project.projectPath);
-        const baseEpisode = base?.episodes?.find(ep => Number(ep.number) === Number(project.currentEpisode));
-        const latestEpisode = latest?.episodes?.find(ep => Number(ep.number) === Number(project.currentEpisode));
-        if (baseEpisode?.[kind] && latestEpisode?.[kind]) baseEpisode[kind].content = latestEpisode[kind].content;
-        if (kind === 'source' && base?.source && latest?.source) base.source.content = latest.source.content;
+        if (!exportWord || activeIsDocx) learn(sender, result);
+        else if (result) result.workspaceVersion = fingerprint(result.content);
+        if (!exportWord) {
+          // The file guard has just verified the window's read version and
+          // committed its new text. Rebase this one content field against the
+          // current metadata so an accepted remote edit is not reported as a
+          // second, spurious metadata conflict on the following project save.
+          const base = projects.get(sender)?.get(key(project.projectPath));
+          const latest = projectByPath(project.projectPath);
+          const baseEpisode = base?.episodes?.find(ep => Number(ep.number) === Number(project.currentEpisode));
+          const latestEpisode = latest?.episodes?.find(ep => Number(ep.number) === Number(project.currentEpisode));
+          if (baseEpisode?.[kind] && latestEpisode?.[kind] && Object.prototype.hasOwnProperty.call(latestEpisode[kind], 'content')) {
+            baseEpisode[kind].content = latestEpisode[kind].content;
+          }
+          if (kind === 'source' && base?.source && latest?.source) base.source.content = latest.source.content;
+        }
         broadcast('workspace:changed', { type: 'document', projectPath: project.projectPath, kind, path: result.path, episode: project.currentEpisode, version: result.workspaceVersion }, sender);
         return result;
       });
@@ -79,7 +85,7 @@ function createWorkspaceService({ key, projectByPath, outputPath, readDocument, 
     if (['projects:open', 'projects:create', 'projects:adopt-folder', 'projects:rescan'].includes(channel) && result?.projectPath) {
       result = projectReply(sender, result);
     }
-    if (channel === 'documents:open') learn(sender, result);
+    if (channel === 'documents:open' || channel === 'episodes:finalize-output') learn(sender, result);
     if (channel === 'episodes:load-documents') {
       const p = { ...args[1].project, currentEpisode: args[1].episodeNumber };
       for (const kind of ['outline', 'script', 'shotlist', 'storyboard']) learn(sender, result[kind], outputPath(p, kind, ''));

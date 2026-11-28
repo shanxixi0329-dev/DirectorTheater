@@ -17,8 +17,9 @@ function createRuntimeSupport(app) {
       fs.appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), event, ...data }) + '\n');
     } catch { /* Diagnostics must never prevent editing. */ }
   };
+  const patchVersion = () => app.getVersion?.() || require('../package.json').version;
   async function start() {
-    log('startup', { patch: '0.1.10', compatGpu, diagnostics, electron: process.versions.electron,
+    log('startup', { patch: patchVersion(), compatGpu, diagnostics, electron: process.versions.electron,
       node: process.versions.node, platform: process.platform, arch: process.arch, os: os.release(),
       cpu: os.cpus()[0]?.model, cores: os.cpus().length, ramGB: Math.round(os.totalmem() / 1073741824) });
     const gpu = async () => {
@@ -30,7 +31,7 @@ function createRuntimeSupport(app) {
         })) });
       } catch (error) { log('gpu-error', { code: String(error.code || 'GPU_INFO_UNAVAILABLE') }); }
     };
-    if (app.getGPUInfo) await gpu();
+    if (diagnostics && app.getGPUInfo) await gpu();
     app.on('child-process-gone', (_event, detail) => log('child-process-gone', { type: detail.type, reason: detail.reason, exitCode: detail.exitCode }));
     app.on('render-process-gone', (_event, _contents, detail) => log('render-process-gone', { reason: detail.reason, exitCode: detail.exitCode }));
     if (diagnostics) {
@@ -46,6 +47,6 @@ function createRuntimeSupport(app) {
       app.on('before-quit', () => { clearInterval(timer); delay.disable(); });
     }
   }
-  return { compatGpu, diagnostics, start, record: log, info: () => ({ compatGpu, diagnostics, patch: '0.1.10' }) };
+  return { compatGpu, diagnostics, start, record: log, info: () => ({ compatGpu, diagnostics, patch: patchVersion() }) };
 }
 module.exports = { createRuntimeSupport };

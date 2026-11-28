@@ -1,0 +1,1230 @@
+/* Director Theater — Tactile Studio Surface & Visual Craft Layer.
+   Loaded last to unify visual materiality across Light, Dark, and Morandi themes.
+   Inspired by guanmo-ai/ui-moments (MIT): layered depth, capsule tracks, ink switches,
+   tabular telemetry, and calm focus rings.
+   Hard invariants:
+   - Never modify .semantic-editor / .highlight-layer typography, padding, or metrics.
+   - Never apply transform to workspace, editor, video, iframe, sticky container, or modal. */
+
+:root {
+  --studio-radius-sm: 9px;
+  --studio-radius-md: 14px;
+  --studio-radius-lg: 18px;
+  --studio-paper: #f7f7f5;
+  --studio-card: #ffffff;
+  --studio-well: #efefec;
+  --studio-well-hover: #e6e5e0;
+  --studio-border: rgba(24, 24, 27, 0.085);
+  --studio-border-strong: rgba(24, 24, 27, 0.16);
+  --studio-specular: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --studio-shadow-card: 0 1px 2px rgba(24, 24, 27, 0.045), 0 10px 28px rgba(24, 24, 27, 0.045);
+  --studio-shadow-card-hover: 0 2px 6px rgba(24, 24, 27, 0.07), 0 14px 34px rgba(24, 24, 27, 0.08);
+  --studio-shadow-pill: 0 2px 8px rgba(24, 24, 27, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --studio-shadow-well: inset 0 1px 2px rgba(24, 24, 27, 0.06);
+  --studio-gold: #b07d3c;
+  --studio-gold-soft: rgba(176, 125, 60, 0.13);
+  --studio-emerald: #267855;
+  --studio-emerald-soft: rgba(38, 120, 85, 0.12);
+  --studio-scroll-thumb: rgba(24, 24, 27, 0.18);
+  --studio-scroll-thumb-hover: rgba(24, 24, 27, 0.34);
+  --press-ease: cubic-bezier(.2, .8, .2, 1);
+  --return-ease: cubic-bezier(.2, .9, .34, 1.16);
+}
+
+:root[data-theme="dark"] {
+  --paper: #0b0c0e;
+  --panel: #141619;
+  --sidebar-bg: #101215;
+  --surface: #121417;
+  --surface-soft: #15171b;
+  --surface-muted: #1b1e23;
+  --surface-hover: #22262d;
+  --soft: #1a1d22;
+  --input-bg: #0f1013;
+  --faint: rgba(226, 189, 126, 0.11);
+  --line: rgba(250, 250, 250, 0.1);
+  --muted: #989ba4;
+  --ink: #f4f5f7;
+  --green: #6ee7b7;
+  --black: #2f6f58;
+  --accent: #6ee7b7;
+  --studio-paper: #0b0c0e;
+  --studio-card: #15171b;
+  --studio-well: #0f1013;
+  --studio-well-hover: #1d2026;
+  --studio-border: rgba(250, 250, 250, 0.09);
+  --studio-border-strong: rgba(250, 250, 250, 0.18);
+  --studio-specular: inset 0 1px 0 rgba(255, 255, 255, 0.065);
+  --studio-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.42), 0 16px 36px rgba(0, 0, 0, 0.34);
+  --studio-shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.5), 0 22px 44px rgba(0, 0, 0, 0.42);
+  --studio-shadow-pill: 0 3px 12px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --studio-shadow-well: inset 0 1px 3px rgba(0, 0, 0, 0.48);
+  --studio-gold: #e2bd7e;
+  --studio-gold-soft: rgba(226, 189, 126, 0.14);
+  --studio-emerald: #6ee7b7;
+  --studio-emerald-soft: rgba(110, 231, 183, 0.13);
+  --studio-scroll-thumb: rgba(250, 250, 250, 0.16);
+  --studio-scroll-thumb-hover: rgba(250, 250, 250, 0.32);
+}
+
+:root[data-theme="morandi"] {
+  --studio-paper: #e6e9e2;
+  --studio-card: #f6f5ef;
+  --studio-well: #dce0d6;
+  --studio-well-hover: #d2d7cb;
+  --studio-border: rgba(54, 68, 60, 0.12);
+  --studio-border-strong: rgba(54, 68, 60, 0.22);
+  --studio-specular: inset 0 1px 0 rgba(255, 255, 252, 0.8);
+  --studio-shadow-card: 0 1px 2px rgba(45, 58, 50, 0.06), 0 10px 26px rgba(45, 58, 50, 0.06);
+  --studio-shadow-card-hover: 0 3px 8px rgba(45, 58, 50, 0.09), 0 14px 32px rgba(45, 58, 50, 0.09);
+  --studio-shadow-pill: 0 2px 7px rgba(45, 58, 50, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --studio-shadow-well: inset 0 1px 2px rgba(45, 58, 50, 0.08);
+  --studio-gold: #916d3f;
+  --studio-gold-soft: rgba(145, 109, 63, 0.12);
+  --studio-emerald: #3e6b58;
+  --studio-emerald-soft: rgba(62, 107, 88, 0.13);
+  --studio-scroll-thumb: rgba(65, 82, 72, 0.22);
+  --studio-scroll-thumb-hover: rgba(65, 82, 72, 0.38);
+}
+
+/* --- Subtle studio scrollbars (replaces clunky default Chromium bars) --- */
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--studio-scroll-thumb);
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--studio-scroll-thumb-hover);
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --- Canvas & Sidebar Materiality --- */
+body {
+  background-color: var(--studio-paper);
+}
+:root[data-theme="dark"] body {
+  background-image:
+    radial-gradient(ellipse 68% 42% at 86% -6%, rgba(223, 190, 140, 0.075) 0%, transparent 56%),
+    radial-gradient(ellipse 52% 48% at 14% 0%, rgba(125, 211, 168, 0.055) 0%, transparent 54%),
+    linear-gradient(180deg, #0d1213 0%, #0b1011 100%);
+}
+.sidebar {
+  border-right: 1px solid var(--studio-border);
+  padding: 18px 14px 14px;
+}
+:root[data-theme="dark"] .sidebar {
+  background: linear-gradient(180deg, #131a1c 0%, #0e1415 100%);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.025);
+}
+.sidebar .brand {
+  padding: 4px 4px 12px;
+  margin: 0 2px 10px;
+  border-bottom: 1px solid var(--studio-border);
+}
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 9px;
+  overflow: hidden;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
+}
+.brand-name {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.brand-subtitle {
+  letter-spacing: 0.09em !important;
+  font-weight: 600;
+}
+.nav-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  padding: 16px 10px 6px;
+}
+.sidebar .nav-row {
+  border-radius: 10px;
+  margin: 2px 0;
+  padding: 1px;
+}
+.sidebar .nav-view-button {
+  border-radius: 9px;
+  min-height: 36px;
+  padding: 8px 11px;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+.sidebar .nav-row:not(.active):hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.sidebar .nav-row.active {
+  background: linear-gradient(100deg, color-mix(in srgb, var(--green) 22%, var(--panel)), color-mix(in srgb, var(--green) 10%, var(--panel)));
+  box-shadow: inset 3px 0 0 var(--green), var(--studio-specular), 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+:root[data-theme="dark"] .sidebar .nav-row.active {
+  background: linear-gradient(100deg, rgba(67, 124, 100, 0.52) 0%, rgba(42, 74, 62, 0.34) 100%);
+  box-shadow: inset 3px 0 0 var(--studio-gold), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+:root[data-theme="dark"] .sidebar .nav-row.active .nav-view-button,
+:root[data-theme="dark"] .sidebar .nav-row.active .nav-view-button:hover {
+  color: #f4f7f3;
+}
+.sidebar .workspace-nav-open {
+  opacity: 0.16;
+  border-radius: 7px;
+  transition: opacity 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+.sidebar .nav-row:hover .workspace-nav-open,
+.sidebar .nav-row.active .workspace-nav-open {
+  opacity: 0.75;
+}
+.sidebar .workspace-nav-open:hover {
+  opacity: 1 !important;
+}
+.sidebar .document-format-select {
+  border-radius: 7px;
+  border-color: var(--studio-border-strong);
+  background: var(--studio-well);
+  font-weight: 600;
+}
+.sidebar .assistant-dock {
+  border-radius: 13px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-card);
+  box-shadow: var(--studio-specular), var(--studio-shadow-card);
+}
+:root[data-theme="dark"] .sidebar .assistant-dock {
+  background: linear-gradient(145deg, rgba(223, 190, 140, 0.08), rgba(21, 28, 30, 0.96) 52%);
+  border-color: rgba(223, 190, 140, 0.18);
+}
+.sidebar .nav-settings-button {
+  border-radius: 9px;
+  border: 1px solid transparent;
+}
+.sidebar .nav-settings-button:hover {
+  border-color: var(--studio-border);
+  background: var(--studio-card);
+}
+
+/* --- Topbar & Workspace Bar Refinement --- */
+.topbar {
+  background: var(--studio-paper);
+  border-bottom: 1px solid var(--studio-border);
+  box-shadow: none !important;
+  padding: 8px 0 10px;
+}
+.topbar-row .project-select {
+  border-bottom: 0;
+  border-radius: 9px;
+  padding: 7px 28px 7px 11px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background: transparent;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.topbar-row .project-select:hover,
+.topbar-row .project-select:focus {
+  background: var(--studio-well);
+}
+.workspace-save-status {
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-weight: 500;
+  background: var(--studio-well);
+  border: 1px solid var(--studio-border);
+}
+.membership-chip {
+  border-radius: 999px !important;
+  padding: 5px 12px !important;
+  border: 1px solid color-mix(in srgb, var(--studio-gold) 34%, var(--studio-border)) !important;
+  background: color-mix(in srgb, var(--studio-gold) 10%, var(--studio-card)) !important;
+  color: var(--ink) !important;
+  box-shadow: var(--studio-specular);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.membership-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--studio-gold);
+  box-shadow: 0 0 0 3px var(--studio-gold-soft);
+}
+
+/* --- Tactile Capsule Tracks (Leaf Tabs / Theme Switcher / Asset Filters) --- */
+.theme-switcher,
+.workspace-tabs,
+.asset-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 11px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+  box-shadow: var(--studio-shadow-well);
+}
+html[data-theme]:not([data-theme="light"]) .theme-switcher {
+  background: var(--studio-well);
+  border-color: var(--studio-border);
+}
+.theme-switcher .ui-glide-pill {
+  border-radius: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--black) 92%, #fff 8%), var(--black));
+  box-shadow: var(--studio-shadow-pill);
+}
+.theme-choice {
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-weight: 500;
+}
+.workspace-bar {
+  padding: 9px 0 8px;
+  border-bottom: 1px solid var(--studio-border);
+}
+.workspace-tabs .ui-glide-pill {
+  border-radius: 8px;
+  background: var(--studio-card);
+  box-shadow: var(--studio-shadow-pill);
+  border: 1px solid var(--studio-border);
+}
+.workspace-tab {
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-weight: 500;
+}
+.workspace-tab-count {
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--red) 15%, var(--studio-card));
+}
+.workspace-focus-toggle,
+.workspace-open-button,
+.workspace-window-menu > summary {
+  border-radius: 9px;
+  border-color: var(--studio-border);
+  background: color-mix(in srgb, var(--studio-card) 72%, transparent);
+}
+.workspace-focus-toggle:hover,
+.workspace-open-button:hover,
+.workspace-window-menu > summary:hover {
+  background: var(--studio-card);
+  border-color: var(--studio-border-strong);
+}
+
+/* --- Tactile Button Hierarchy (Eliminates Noisy Box Outlines) --- */
+.button {
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.button:not(.secondary):not(.quiet):not(.danger) {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--black) 90%, #ffffff 10%) 0%, var(--black) 100%);
+  border: 1px solid color-mix(in srgb, var(--black) 78%, #ffffff 22%);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--black) 28%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+:root[data-theme="dark"] .button:not(.secondary):not(.quiet):not(.danger):not(:disabled) {
+  background: linear-gradient(180deg, #4b816b 0%, #386552 100%);
+  border-color: rgba(154, 212, 182, 0.36);
+  color: #f6faf7;
+  box-shadow: 0 3px 12px rgba(24, 62, 46, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+:root[data-theme="dark"] .button:not(.secondary):not(.quiet):not(.danger):not(:disabled):hover {
+  background: linear-gradient(180deg, #56927a 0%, #41745f 100%);
+  border-color: rgba(178, 228, 202, 0.55);
+}
+html[data-theme] .button.secondary {
+  background: color-mix(in srgb, var(--studio-card) 92%, transparent);
+  border: 1px solid var(--studio-border-strong);
+  color: var(--ink);
+  box-shadow: var(--studio-specular), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+html[data-theme] .button.secondary:not(:disabled):hover {
+  background: var(--studio-well-hover);
+  border-color: color-mix(in srgb, var(--studio-gold) 45%, var(--studio-border-strong));
+}
+html[data-theme] .button.quiet {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+}
+html[data-theme] .button.quiet:not(:disabled):hover {
+  background: var(--studio-well);
+  color: var(--ink);
+}
+.button.small {
+  border-radius: 8px;
+  padding: 6px 11px;
+  min-height: 30px;
+  font-size: 12px;
+}
+
+/* --- Episode Rail (Odometer / Detent Capsule Strip) --- */
+.episode-rail {
+  gap: 10px;
+  padding-block: 8px 6px;
+}
+.episode-rail > span {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+.episode-rail-scroll {
+  gap: 5px;
+  padding: 2px 2px 6px;
+}
+html[data-theme] .episode-rail button {
+  border-radius: 8px;
+  min-width: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--studio-border);
+  background: color-mix(in srgb, var(--studio-card) 76%, transparent);
+  color: var(--muted);
+  font-weight: 500;
+  box-shadow: none;
+}
+html[data-theme] .episode-rail button:hover {
+  background: var(--studio-card);
+  border-color: var(--studio-border-strong);
+  color: var(--ink);
+}
+html[data-theme] .episode-rail button.current {
+  border-color: color-mix(in srgb, var(--green) 58%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--black) 90%, #fff 10%), var(--black));
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--black) 42%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.episode-rail .episode-split-button {
+  border-style: dashed;
+  background: transparent !important;
+}
+
+/* --- Elevated Studio Cards & Recessed Form Wells --- */
+html[data-theme] .card,
+html[data-theme] .editor-commandbar,
+html[data-theme] .asset-episode-overview,
+html[data-theme] .asset-prompt-card,
+html[data-theme] .asset-card,
+html[data-theme] .local-check-context,
+html[data-theme] .storyboard-check-pin {
+  border-radius: var(--studio-radius-lg);
+  border: 1px solid var(--studio-border);
+  background: var(--studio-card);
+  box-shadow: var(--studio-specular), var(--studio-shadow-card);
+}
+.editor-commandbar {
+  border-radius: 13px !important;
+  padding: 9px 12px;
+}
+.local-check-context {
+  border-radius: 12px 12px 0 0 !important;
+  border-bottom: 0 !important;
+}
+.sidebar-check-slot .storyboard-check-pin {
+  border-radius: 0 0 12px 12px !important;
+}
+:is(.field input, .field select, .field textarea, .asset-batch-controls input, .asset-batch-controls select, .asset-batch-queue-editor textarea, .review-playlist input, .review-note-filters input, .review-note-filters select, .project-history-tools input):not(.semantic-editor) {
+  border-radius: 9px;
+  border: 1px solid var(--studio-border-strong);
+  background: var(--studio-well);
+  box-shadow: var(--studio-shadow-well);
+  transition: border-color 140ms ease, box-shadow 160ms ease, background-color 140ms ease;
+}
+:is(.field input, .field select, .field textarea, .asset-batch-controls input, .asset-batch-controls select, .asset-batch-queue-editor textarea, .review-playlist input, .review-note-filters input, .review-note-filters select, .project-history-tools input):not(.semantic-editor):focus {
+  border-color: var(--green);
+  background: var(--studio-card);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
+  outline: none;
+}
+.inline-document-find,
+.asset-find {
+  border-radius: 999px !important;
+  border: 1px solid var(--studio-border-strong) !important;
+  background: var(--studio-well) !important;
+  box-shadow: var(--studio-shadow-well);
+  padding-inline: 10px 6px;
+}
+.inline-document-find input,
+.asset-find input {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.inline-document-find:focus-within,
+.asset-find:focus-within {
+  border-color: var(--green) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+/* --- Assets Page & Batch Workbench Visual Overhaul --- */
+.asset-toolbar {
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--studio-border);
+}
+.asset-title strong {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.asset-title span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--studio-well);
+  border: 1px solid var(--studio-border);
+  font-size: 11px;
+}
+.asset-episode-overview {
+  padding: 16px 18px !important;
+  margin-bottom: 14px;
+}
+.asset-episode-overview-title {
+  margin-bottom: 12px;
+}
+.asset-episode-overview-title strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+.asset-episode-categories {
+  gap: 10px;
+}
+html[data-theme] .asset-episode-category {
+  border-radius: 11px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+  padding: 11px 14px;
+  box-shadow: var(--studio-shadow-well);
+}
+html[data-theme] .asset-episode-category:nth-child(1) { border-left: 3px solid var(--green); }
+html[data-theme] .asset-episode-category:nth-child(2) { border-left: 3px solid #58a6c9; }
+html[data-theme] .asset-episode-category:nth-child(3) { border-left: 3px solid var(--studio-gold); }
+
+/* Gliding Leaf Tabs on Assets category bar (人物 / 场景 / 道具) */
+.asset-filters {
+  position: relative;
+}
+.asset-filters .ui-glide-pill {
+  border-radius: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--black) 90%, #fff 10%), var(--black));
+  box-shadow: var(--studio-shadow-pill);
+}
+.asset-filters .asset-filter {
+  position: relative;
+  z-index: 1;
+  border: 0 !important;
+  border-radius: 8px;
+  background: transparent !important;
+  padding: 6px 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.asset-filters .asset-filter:hover {
+  color: var(--ink);
+}
+html[data-theme] .asset-filters[data-ui-glide-ready="true"] .asset-filter.active,
+html[data-theme] .asset-filters[data-ui-glide-ready="true"] .asset-filter.active:hover {
+  background: transparent !important;
+  color: #ffffff !important;
+}
+.asset-filters:not([data-ui-glide-ready="true"]) .asset-filter.active {
+  background: var(--black) !important;
+  color: #ffffff !important;
+}
+
+/* Batch Workbench Flagship Card */
+.asset-batch-workbench {
+  padding: 20px 22px;
+  border-radius: 18px !important;
+  position: relative;
+  scroll-margin-top: calc(var(--director-topbar-height, 132px) + 16px);
+}
+.asset-batch-heading {
+  border-bottom: 1px solid var(--studio-border);
+  padding-bottom: 16px;
+}
+.asset-batch-heading .eyebrow {
+  color: var(--studio-gold);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+.asset-batch-heading h2 {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.asset-batch-archive-bar {
+  border-radius: 11px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+  box-shadow: var(--studio-shadow-well);
+  padding: 10px 14px;
+}
+.asset-batch-status-panel {
+  border-radius: 13px;
+  border: 1px dashed var(--studio-border-strong);
+  background: color-mix(in srgb, var(--studio-well) 70%, transparent);
+  padding: 18px;
+}
+.asset-batch-list-row {
+  border-radius: 11px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+.asset-batch-list-row.selected {
+  background: var(--studio-card);
+  border-color: color-mix(in srgb, var(--green) 52%, transparent);
+  box-shadow: var(--studio-specular), 0 4px 14px rgba(0, 0, 0, 0.14);
+}
+.asset-batch-pill {
+  border-radius: 999px;
+  border-color: var(--studio-border);
+  background: var(--studio-well);
+  padding: 5px 11px;
+}
+.asset-batch-pill.active {
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+  background: color-mix(in srgb, var(--green) 16%, var(--studio-card));
+  color: var(--ink);
+}
+
+/* --- Ink Switch Tactile Toggles on Settings Rows (ui-moments signature) --- */
+.check-setting-row input[type="checkbox"],
+.api-smart-read input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 38px !important;
+  height: 22px !important;
+  flex: 0 0 38px !important;
+  margin-top: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--studio-border-strong);
+  background: var(--studio-well);
+  box-shadow: var(--studio-shadow-well);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background-color 200ms var(--ui-ease, ease), border-color 200ms var(--ui-ease, ease);
+}
+.check-setting-row input[type="checkbox"]::after,
+.api-smart-read input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  transition: transform 240ms var(--ui-spring, cubic-bezier(.3, 1.45, .5, 1)), width 160ms ease;
+}
+.check-setting-row input[type="checkbox"]:checked,
+.api-smart-read input[type="checkbox"]:checked {
+  background: var(--green);
+  border-color: color-mix(in srgb, var(--green) 75%, #000);
+  animation: none !important;
+}
+.check-setting-row input[type="checkbox"]:checked::after,
+.api-smart-read input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+:root[data-theme="dark"] .check-setting-row input[type="checkbox"]:checked,
+:root[data-theme="dark"] .api-smart-read input[type="checkbox"]:checked {
+  background: #488169;
+  border-color: rgba(154, 212, 182, 0.5);
+}
+:root[data-ui-motion="full"] .check-setting-row input[type="checkbox"]:active::after,
+:root[data-ui-motion="full"] .api-smart-read input[type="checkbox"]:active::after {
+  width: 20px;
+}
+
+/* --- Modals & Dialogs Layered Polish --- */
+.modal-overlay {
+  background: rgba(8, 10, 13, 0.68);
+  backdrop-filter: blur(8px);
+}
+.modal {
+  border-radius: 20px !important;
+  border: 1px solid var(--studio-border-strong) !important;
+  background: var(--studio-card) !important;
+  box-shadow: var(--studio-specular), 0 32px 90px rgba(0, 0, 0, 0.48) !important;
+}
+.modal-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--studio-border);
+}
+
+/* ============================================================================
+   UI Moments Studio Visual Overhaul — High-Impact Surfaces & Components
+   (Director Overview, Welcome Hero, Automation Pipeline, Asset Batch 3-Step
+    Track, Membership Activation & Admin Issuer Mini-App, Floating Glass Toast)
+   ============================================================================ */
+
+/* --- Director Home: Editorial Hero Banner + Color-Coded Stage Cards --- */
+.director-toolbar {
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--studio-border);
+}
+.director-toolbar h1 {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+html[data-theme] .director-next.card {
+  position: relative;
+  overflow: hidden;
+  padding: 22px 24px !important;
+  margin-bottom: 18px !important;
+  border: 1px solid color-mix(in srgb, var(--studio-gold) 36%, var(--studio-border)) !important;
+  background:
+    radial-gradient(circle at 92% 18%, color-mix(in srgb, var(--studio-gold) 16%, transparent) 0%, transparent 48%),
+    radial-gradient(circle at 12% 100%, color-mix(in srgb, var(--studio-emerald) 14%, transparent) 0%, transparent 50%),
+    var(--studio-card) !important;
+  box-shadow: var(--studio-specular), var(--studio-shadow-card-hover) !important;
+}
+.director-next .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--studio-gold-soft);
+  color: var(--studio-gold);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.director-next h2 {
+  font-size: 21px;
+  font-weight: 800;
+  margin: 8px 0 6px;
+  letter-spacing: -0.02em;
+}
+.director-stage-grid {
+  gap: 14px !important;
+  margin-bottom: 18px !important;
+}
+html[data-theme] .director-stage.card {
+  position: relative;
+  padding: 18px 18px 16px !important;
+  border-top: 3px solid var(--studio-border-strong) !important;
+  transition: border-color 180ms var(--ui-ease, ease), box-shadow 200ms var(--ui-ease, ease), background-color 180ms ease;
+}
+html[data-theme] .director-stage.card:hover {
+  box-shadow: var(--studio-specular), var(--studio-shadow-card-hover) !important;
+  border-color: color-mix(in srgb, var(--studio-gold) 38%, var(--studio-border-strong)) !important;
+}
+html[data-theme] .director-stage.confirmed.card {
+  border-top-color: var(--studio-emerald) !important;
+}
+html[data-theme] .director-stage.stale.card {
+  border-top-color: var(--studio-gold) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--studio-gold) 7%, var(--studio-card)), var(--studio-card) 45%) !important;
+}
+html[data-theme] .director-stage.ready.card {
+  border-top-color: #4f94c4 !important;
+}
+.director-state {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 600;
+  background: var(--studio-well);
+  border: 1px solid var(--studio-border);
+}
+.director-state.confirmed {
+  background: var(--studio-emerald-soft);
+  border-color: color-mix(in srgb, var(--studio-emerald) 35%, transparent);
+  color: var(--studio-emerald);
+}
+.director-state.stale {
+  background: var(--studio-gold-soft);
+  border-color: color-mix(in srgb, var(--studio-gold) 42%, transparent);
+  color: var(--studio-gold);
+}
+.director-file-name {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--studio-well);
+  border: 1px solid var(--studio-border);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.director-source-list > div {
+  padding: 10px 12px !important;
+  border-radius: 11px !important;
+  background: var(--studio-well) !important;
+  border: 1px solid var(--studio-border);
+}
+
+/* --- Welcome Screen ("开始创作") Editorial Cards --- */
+.project-welcome h1 {
+  font-size: clamp(32px, 3.6vw, 46px);
+  letter-spacing: -0.03em;
+}
+.project-entry-grid {
+  gap: 16px !important;
+  margin-top: 24px !important;
+}
+html[data-theme] .project-entry {
+  border-radius: 18px !important;
+  padding: 24px 22px !important;
+  border: 1px solid var(--studio-border) !important;
+  background: var(--studio-card) !important;
+  box-shadow: var(--studio-specular), var(--studio-shadow-card) !important;
+  transition: border-color 180ms ease, box-shadow 200ms ease, background-color 180ms ease;
+}
+html[data-theme] .project-entry:hover {
+  border-color: color-mix(in srgb, var(--studio-gold) 55%, var(--studio-border-strong)) !important;
+  box-shadow: var(--studio-specular), var(--studio-shadow-card-hover) !important;
+}
+.project-entry-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--studio-gold-soft);
+  color: var(--studio-gold);
+  font: 700 13px/1 ui-monospace, monospace;
+  margin-bottom: 12px;
+}
+
+/* --- Asset Batch 3-Step Pipeline Track (ui-moments Step Track) --- */
+.asset-batch-pipeline-steps {
+  list-style: none;
+  margin: 14px 0 16px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.asset-batch-pipeline-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 14px;
+  border-radius: 13px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+  box-shadow: var(--studio-shadow-well);
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+.asset-batch-pipeline-steps li > span {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font: 700 12px/1 ui-monospace, monospace;
+  background: var(--studio-card);
+  border: 1px solid var(--studio-border-strong);
+  color: var(--muted);
+}
+.asset-batch-pipeline-steps li strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.asset-batch-pipeline-steps li small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.asset-batch-pipeline-steps li.is-current {
+  background: var(--studio-card);
+  border-color: color-mix(in srgb, var(--studio-gold) 52%, var(--studio-border));
+  box-shadow: var(--studio-specular), 0 4px 16px color-mix(in srgb, var(--studio-gold) 12%, transparent);
+}
+.asset-batch-pipeline-steps li.is-current > span {
+  background: var(--studio-gold);
+  border-color: var(--studio-gold);
+  color: #111214;
+}
+.asset-batch-pipeline-steps li.is-done {
+  background: color-mix(in srgb, var(--studio-emerald) 8%, var(--studio-card));
+  border-color: color-mix(in srgb, var(--studio-emerald) 38%, var(--studio-border));
+}
+.asset-batch-pipeline-steps li.is-done > span {
+  background: var(--studio-emerald);
+  border-color: var(--studio-emerald);
+  color: #0b0f0d;
+}
+@media (max-width: 900px) {
+  .asset-batch-pipeline-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Tide Progress Glossy Bar --- */
+.asset-batch-progress-track {
+  height: 10px !important;
+  border-radius: 999px !important;
+  background: var(--studio-well) !important;
+  box-shadow: var(--studio-shadow-well);
+  border: 1px solid var(--studio-border);
+  overflow: hidden;
+}
+.asset-batch-progress-seg {
+  border-radius: 999px;
+  transition: width 360ms var(--ui-ease, ease);
+}
+.asset-batch-toolbar {
+  padding: 12px 14px;
+  border-radius: 13px;
+  background: var(--studio-well);
+  border: 1px solid var(--studio-border);
+  margin: 12px 0;
+}
+
+/* --- Automation Pipeline Pills & Image Stage Panel --- */
+.flow-steps label {
+  border-radius: 11px !important;
+  border: 1px solid var(--studio-border) !important;
+  background: var(--studio-well) !important;
+  padding: 10px 14px !important;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+.flow-steps label:has(input:checked) {
+  background: color-mix(in srgb, var(--studio-emerald) 12%, var(--studio-card)) !important;
+  border-color: color-mix(in srgb, var(--studio-emerald) 45%, var(--studio-border)) !important;
+  box-shadow: var(--studio-specular);
+}
+.flow-image-config {
+  margin: 12px 0 16px;
+  padding: 14px 16px;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--studio-gold) 40%, var(--studio-border));
+  background: color-mix(in srgb, var(--studio-gold) 7%, var(--studio-well));
+}
+.flow-status {
+  border-radius: 12px;
+  border: 1px solid var(--studio-border);
+  border-left-width: 4px !important;
+  background: var(--studio-well) !important;
+}
+.flow-log {
+  border-radius: 10px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well) !important;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+/* --- Membership Center: Leaf Tabs, Drag Dropzone, Admin Issuer Mini-App --- */
+.membership-modal {
+  width: min(680px, 94vw) !important;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.membership-tabs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  margin: 12px 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+  box-shadow: var(--studio-shadow-well);
+}
+.membership-tabs .ui-glide-pill {
+  border-radius: 9px;
+  background: var(--studio-card);
+  box-shadow: var(--studio-shadow-pill);
+  border: 1px solid var(--studio-border);
+}
+.membership-tab {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-radius: 9px;
+  padding: 7px 16px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.membership-tab:hover {
+  color: var(--ink);
+}
+.membership-tab.active {
+  color: var(--ink);
+}
+.membership-tabs:not([data-ui-glide-ready="true"]) .membership-tab.active {
+  background: var(--studio-card);
+  box-shadow: var(--studio-shadow-pill);
+}
+.membership-admin-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 13px 16px;
+  margin: 10px 0 14px;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--studio-emerald) 44%, var(--studio-border));
+  background: color-mix(in srgb, var(--studio-emerald) 11%, var(--studio-card));
+  box-shadow: var(--studio-specular);
+}
+.membership-admin-banner strong {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.membership-admin-banner small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.membership-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.membership-dropzone {
+  padding: 18px 16px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--studio-border-strong);
+  background: var(--studio-well);
+  text-align: center;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+.membership-dropzone strong {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+}
+.membership-dropzone span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.membership-dropzone.is-dragover,
+.membership-dropzone:focus-visible {
+  border-color: var(--studio-emerald);
+  background: color-mix(in srgb, var(--studio-emerald) 12%, var(--studio-card));
+  box-shadow: 0 0 0 3px var(--studio-emerald-soft);
+  outline: none;
+}
+.membership-manual-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+}
+.membership-manual-box summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.membership-manual-box textarea {
+  margin-top: 10px;
+  width: 100%;
+}
+.membership-issuer-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+}
+.membership-plan-choice {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-well);
+  color: var(--ink);
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+.membership-plan-choice strong {
+  font-size: 13px;
+}
+.membership-plan-choice span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.membership-plan-choice.active {
+  background: color-mix(in srgb, var(--studio-emerald) 13%, var(--studio-card));
+  border-color: var(--studio-emerald);
+  box-shadow: 0 0 0 2px var(--studio-emerald-soft);
+}
+.membership-issuer-machine {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.membership-issuer-machine input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.membership-issued-card {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--studio-emerald) 40%, var(--studio-border));
+  background: color-mix(in srgb, var(--studio-emerald) 6%, var(--studio-well));
+}
+.membership-issued-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.membership-issued-head strong {
+  display: block;
+  font-size: 13.5px;
+}
+.membership-issued-head small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.membership-issued-token {
+  width: 100%;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+/* --- Floating Studio Toast Pill --- */
+#toast {
+  border-radius: 12px !important;
+  border: 1px solid var(--studio-border-strong) !important;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34), var(--studio-specular) !important;
+}
+.badge.pass {
+  background: var(--studio-emerald-soft);
+  color: var(--studio-emerald);
+  border: 1px solid color-mix(in srgb, var(--studio-emerald) 35%, transparent);
+}
+.badge.warn {
+  background: var(--studio-gold-soft);
+  color: var(--studio-gold);
+  border: 1px solid color-mix(in srgb, var(--studio-gold) 38%, transparent);
+}
+
+/* --- Ink Switch extended to Automation & Asset Batch checkboxes --- */
+.flow-check-grid input[type="checkbox"],
+.asset-batch-inline-check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 36px !important;
+  height: 20px !important;
+  flex: 0 0 36px !important;
+  border-radius: 999px;
+  border: 1px solid var(--studio-border-strong);
+  background: var(--studio-well);
+  box-shadow: var(--studio-shadow-well);
+  cursor: pointer;
+  transition: background-color 200ms var(--ui-ease, ease), border-color 200ms var(--ui-ease, ease);
+}
+.flow-check-grid input[type="checkbox"]::after,
+.asset-batch-inline-check input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  transition: transform 240ms var(--ui-spring, cubic-bezier(.3, 1.45, .5, 1));
+}
+.flow-check-grid input[type="checkbox"]:checked,
+.asset-batch-inline-check input[type="checkbox"]:checked {
+  background: var(--studio-emerald);
+  border-color: color-mix(in srgb, var(--studio-emerald) 75%, #000);
+}
+.flow-check-grid input[type="checkbox"]:checked::after,
+.asset-batch-inline-check input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+
+/* --- Respect Reduced / Off Motion Settings --- */
+:root[data-ui-motion="reduced"] :is(
+  .check-setting-row input[type="checkbox"],
+  .check-setting-row input[type="checkbox"]::after,
+  .api-smart-read input[type="checkbox"],
+  .api-smart-read input[type="checkbox"]::after,
+  .flow-check-grid input[type="checkbox"],
+  .flow-check-grid input[type="checkbox"]::after,
+  .asset-batch-inline-check input[type="checkbox"],
+  .asset-batch-inline-check input[type="checkbox"]::after,
+  .sidebar .workspace-nav-open,
+  .director-stage.card,
+  .project-entry
+) {
+  transition-duration: 80ms;
+  transition-timing-function: ease-out;
+}
+:root[data-ui-motion="off"] :is(
+  .check-setting-row input[type="checkbox"],
+  .check-setting-row input[type="checkbox"]::after,
+  .api-smart-read input[type="checkbox"],
+  .api-smart-read input[type="checkbox"]::after,
+  .flow-check-grid input[type="checkbox"],
+  .flow-check-grid input[type="checkbox"]::after,
+  .asset-batch-inline-check input[type="checkbox"],
+  .asset-batch-inline-check input[type="checkbox"]::after,
+  .sidebar .workspace-nav-open,
+  .asset-batch-list-row,
+  .topbar-row .project-select,
+  .director-stage.card,
+  .project-entry,
+  .asset-batch-progress-seg
+) {
+  transition: none !important;
+}
+:root[data-ui-motion="off"] .modal-overlay,
+:root[data-ui-motion="off"] #toast {
+  backdrop-filter: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .check-setting-row input[type="checkbox"]::after,
+  .api-smart-read input[type="checkbox"]::after,
+  .flow-check-grid input[type="checkbox"]::after,
+  .asset-batch-inline-check input[type="checkbox"]::after {
+    transition: none;
+  }
+}

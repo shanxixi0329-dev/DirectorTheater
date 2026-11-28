@@ -1,7 +1,105 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, powerSaveBlocker, clipboard, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, powerSaveBlocker, clipboard, screen, Menu, safeStorage } = require('electron');
+const { createLocalSecrets } = require('./local-secrets');
 const productionService = require('./production').createService();
 const executionJournal = require('./execution-journal').createJournal();
 const mediaProbe = require('./media-probe');
+const archiveLibrary = require('./asset-archive-library').createArchiveLibrary({
+  userData: () => app.getPath('userData'), writeAtomic: writeFileAtomically
+});
+const assetBatches = require('./asset-batch-service').createAssetBatchService({
+  archiveLibrary, nativeImage: require('electron').nativeImage
+});
+const localSecrets = createLocalSecrets({
+  userData: () => app.getPath('userData'),
+  safeStorage,
+  keyFn: value => normalizedPath(value),
+  writeAtomic: writeFileAtomically
+});
+let localImageRunnerConfig = null;
+function imageRunnerConfigPath() {
+  return path.join(app.getPath('userData'), 'image-runner-config.json');
+}
+function loadLocalImageRunnerConfigSync() {
+  if (localImageRunnerConfig) return localImageRunnerConfig;
+  try {
+    const raw = fsSync.readFileSync(imageRunnerConfigPath(), 'utf8').replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(raw);
+    localImageRunnerConfig = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    localImageRunnerConfig = {};
+  }
+  return localImageRunnerConfig;
+}
+function resolvedOpenAiImageApiKey(cfg = loadLocalImageRunnerConfigSync()) {
+  const stored = localSecrets.decodeSecret(cfg.openaiApiKeyEnc || cfg.openaiApiKey);
+  return String(stored || process.env.DIRECTOR_IMAGE_API_KEY || '').trim();
+}
+function publicImageRunnerConfig() {
+  const cfg = loadLocalImageRunnerConfigSync();
+  const openaiKey = resolvedOpenAiImageApiKey(cfg);
+  const maskKey = value => !value ? '' : value.length <= 8 ? '****' : `${value.slice(0, 4)}••••${value.slice(-4)}`;
+  return {
+    magpieBaseUrl: String(cfg.magpieBaseUrl || process.env.MAGPIE_ADDR || 'http://127.0.0.1:3425').trim(),
+    magpieTextModel: String(cfg.magpieTextModel || '').trim(),
+    openaiBaseUrl: String(cfg.openaiBaseUrl || process.env.DIRECTOR_IMAGE_API_BASE_URL || '').trim(),
+    openaiModel: String(cfg.openaiModel || process.env.DIRECTOR_IMAGE_MODEL || 'gpt-image-2.5').trim() || 'gpt-image-2.5',
+    hasOpenaiApiKey: Boolean(openaiKey),
+    openaiApiKeyMasked: maskKey(openaiKey),
+    codexPath: String(cfg.codexPath || '').trim(),
+    codexModel: String(cfg.codexModel || '').trim(),
+    codexReasoningEffort: String(cfg.codexReasoningEffort || 'low').trim() || 'low'
+  };
+}
+async function saveLocalImageRunnerConfig(patch = {}) {
+  const prev = { ...loadLocalImageRunnerConfigSync() };
+  const prevKey = localSecrets.decodeSecret(prev.openaiApiKeyEnc || prev.openaiApiKey);
+  const nextPlainKey = patch.clearOpenaiApiKey ? '' : (String(patch.openaiApiKey || '').trim() || prevKey);
+  const next = {
+    magpieBaseUrl: String(patch.magpieBaseUrl ?? prev.magpieBaseUrl ?? '').trim(),
+    magpieTextModel: String(patch.magpieTextModel ?? prev.magpieTextModel ?? '').trim(),
+    openaiBaseUrl: String(patch.openaiBaseUrl ?? prev.openaiBaseUrl ?? '').trim(),
+    openaiModel: String(patch.openaiModel ?? prev.openaiModel ?? '').trim(),
+    openaiApiKey: '',
+    openaiApiKeyEnc: nextPlainKey ? localSecrets.encodeSecret(nextPlainKey) : '',
+    codexPath: String(patch.codexPath ?? prev.codexPath ?? '').trim(),
+    codexModel: String(patch.codexModel ?? prev.codexModel ?? '').trim(),
+    codexReasoningEffort: ['low', 'medium', 'high'].includes(String(patch.codexReasoningEffort || '').trim())
+      ? String(patch.codexReasoningEffort).trim()
+      : (prev.codexReasoningEffort || 'low')
+  };
+  await writeFileAtomically(imageRunnerConfigPath(), JSON.stringify(next, null, 2), 'utf8');
+  localImageRunnerConfig = next;
+  return publicImageRunnerConfig();
+}
+const codexQueue = require('./codex-queue-service').createCodexQueueService({
+  userData: () => app.getPath('userData'),
+  readDocument: file => readTextDocument(file),
+  loadPromptLibrary: (project, ep) => loadAssetPromptLibrary(project, ep),
+  getConfig: () => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    return {
+      magpieBaseUrl: String(cfg.magpieBaseUrl || process.env.MAGPIE_ADDR || 'http://127.0.0.1:3425').trim(),
+      magpieTextModel: String(cfg.magpieTextModel || '').trim(),
+      codexPath: String(cfg.codexPath || '').trim(),
+      codexModel: String(cfg.codexModel || '').trim(),
+      reasoningEffort: String(cfg.codexReasoningEffort || 'low').trim() || 'low'
+    };
+  }
+});
+const imageProviders = require('./image-providers').createImageProviders({
+  getMagpieConfig: () => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    return { baseUrl: String(cfg.magpieBaseUrl || process.env.MAGPIE_ADDR || 'http://127.0.0.1:3425').trim() };
+  },
+  getOpenAiConfig: () => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    return {
+      baseUrl: String(cfg.openaiBaseUrl || process.env.DIRECTOR_IMAGE_API_BASE_URL || '').trim(),
+      apiKey: resolvedOpenAiImageApiKey(cfg),
+      model: String(cfg.openaiModel || process.env.DIRECTOR_IMAGE_MODEL || 'gpt-image-2.5').trim() || 'gpt-image-2.5'
+    };
+  }
+});
 const reviewService = require('./review-service').createReviewService();
 const aiCore = require('./ai-core');
 const episodeSlots = require('./episode-slots');
@@ -20,13 +118,17 @@ const fs = require('fs/promises');
 const crypto = require('crypto');
 const { pathToFileURL } = require('node:url');
 const { spawn, execFile } = require('child_process');
-const mammoth = require('mammoth');
-const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
+let _mammoth = null;
+let _docx = null;
+const getMammoth = () => (_mammoth ||= require('mammoth'));
+const getDocx = () => (_docx ||= require('docx'));
+const { normalizeDocxRawText } = require('./global-text-search');
+const documentChecks = require('./document-checks');
 
 let mainWindow;
 let workspaceWindows;
 const windowTaskCounts = new Map();
-const windowTaskChannels = new Set(['chatgpt:execute', 'workflow:execute', 'ai:batch', 'automation:run', 'quality:check', 'quality:propose', 'director:propose', 'assistant:ask', 'documents:replace-project-text', 'documents:undo-replacement']);
+const windowTaskChannels = new Set(['chatgpt:execute', 'workflow:execute', 'ai:batch', 'automation:run', 'quality:check', 'quality:propose', 'director:propose', 'assistant:ask', 'documents:replace-project-text', 'documents:undo-replacement', 'asset-batch:run', 'codex-queue:prepare']);
 const ipcWindowContext = new (require('node:async_hooks').AsyncLocalStorage)();
 const activeWorkspaceWindow = () => workspaceWindows?.get(ipcWindowContext.getStore()?.sender)?.win || mainWindow;
 const broadcastWorkspace = (channel, payload, except) => workspaceWindows?.broadcast(channel, payload, except);
@@ -89,6 +191,13 @@ const membershipService = createMembershipService({ app, dialog, mainWindow: () 
 const smokeMode = process.argv.includes('--smoke');
 const uploadSmokeMode = process.argv.includes('--upload-smoke') || process.env.AI_DIRECTOR_UPLOAD_SMOKE === '1';
 if (smokeMode || uploadSmokeMode || runtimeSupport.compatGpu) app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-features', 'SkiaGraphite,Vulkan,MediaRouter,AutofillServerCommunication,OptimizationHints,Translate,BackForwardCache');
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.commandLine.appendSwitch('disk-cache-size', '16777216');
+app.commandLine.appendSwitch('media-cache-size', '16777216');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
 let ownsInstance = true;
 if (!smokeMode && !uploadSmokeMode && !process.env.DIRECTOR_THEATER_QA_USER_DATA && app.requestSingleInstanceLock) {
   ownsInstance = app.requestSingleInstanceLock();
@@ -118,8 +227,8 @@ const qualityService = createQualityService({
     await writeEditableDocument(file,content);
     return {path:file,content};
   },
-  localScript: (content,source) => validateScriptDialogueFidelity(content,source),
-  localPrompt: (content,script,shotlist) => validateStoryboard(content,script,shotlist),
+  localScript: (content,source) => documentChecks.validateScriptDialogueFidelity(content,source),
+  localPrompt: (content,script,shotlist) => documentChecks.validateStoryboard(content,script,shotlist),
   assertEdit: () => membershipService.assertCanEdit(),
   onEvent: event => sendWorkspaceTaskEvent('automation:event', event)
 });
@@ -148,6 +257,31 @@ const automationService = createAutomationService({
     if (selected.builtin) await membershipService.assertCanUseBuiltinTemplates();
     if (!descriptor?.path) throw Error('要求文件失效，请重新选择。');
     return readTextDocument(descriptor.path);
+  },
+  runAssetImages: async (project, { episode, registry, options: autoOpt, onLog }) => {
+    let queue;
+    try {
+      queue = codexQueue.buildQueueFromRegistry(registry, { projectTitle: project.title || '', episode });
+    } catch {
+      onLog?.(`第 ${episode} 集自动资产库暂无提示词，尝试通过 Magpie / AI 从本集剧本生成队列…`);
+      const prepared = await codexQueue.prepareViaAi(project, { episode, source: 'auto' });
+      queue = prepared.queue;
+    }
+    const providerId = autoOpt?.imageProvider || 'magpie';
+    const model = autoOpt?.imageModel || 'codex/gpt-image-2';
+    const concurrency = Number(autoOpt?.imageConcurrency) || 2;
+    const batchId = `auto-ep${episode}`;
+    const existingBatches = await assetBatches.list(project);
+    if (!existingBatches.some(b => b.id === batchId)) {
+      await assetBatches.create(project, batchId, queue, { model, provider_id: providerId });
+    }
+    onLog?.(`第 ${episode} 集已建立生图批次 ${batchId}（${queue.jobs.length} 项 · 模型 ${model}），开始通过 ${providerId} 生成 L0 母板…`);
+    const driver = imageProviders.get(providerId);
+    const snapshot = await assetBatches.run(project, batchId, driver, { concurrency, resume: true });
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath });
+    const stagedCount = (snapshot.cards || []).filter(c => ['staged', 'published'].includes(c.state)).length;
+    onLog?.(`第 ${episode} 集自动生图完成：${stagedCount}/${(snapshot.cards || []).length} 张已暂存待目检，可前往「素材 → 批量生图」查看并发布归档。`);
+    return { batchId, providerId, model, total: (snapshot.cards || []).length, staged: stagedCount };
   },
   onEvent: event => sendWorkspaceTaskEvent('automation:event', event)
 });
@@ -321,7 +455,7 @@ async function readEpisodeHint(filePath, fileInfo) {
 
 async function readEpisodeHintUncached(filePath) {
   if (path.extname(filePath).toLowerCase() === '.docx') {
-    return (await mammoth.extractRawText({ path: filePath })).value.slice(0, 65536);
+    return (await getMammoth().extractRawText({ path: filePath })).value.slice(0, 65536);
   }
   const handle = await fs.open(filePath, 'r');
   try {
@@ -499,20 +633,30 @@ async function findEpisodeDocumentFile(project, kind, directory, episodeNumber) 
   return chooseEpisodeFile(files, project, kind, episodeNumber);
 }
 
+function isSharedOutlineFile(filePath) {
+  if (!filePath) return false;
+  return episodeNumberFromFileName(path.basename(filePath)) === null;
+}
+
 async function findOutlineDocumentFile(project, directory, episodeNumber) {
   const files = await listTextFiles(directory, 1600, { identifyEpisodes: true, extensions: editorExtensions });
   const exact = chooseEpisodeFile(files, project, 'outline', episodeNumber);
   if (exact) return exact;
   const selected = selectedPathForOutline(project, episodeNumber);
   const selectedFile = selected && files.find((file) => path.resolve(file.path).toLowerCase() === path.resolve(selected).toLowerCase());
-  return selectedFile || (files.length === 1 ? files[0] : null);
+  if (selectedFile) return selectedFile;
+  return files.length === 1 && isSharedOutlineFile(files[0].path) ? files[0] : null;
 }
 
 function selectedPathForOutline(project, episodeNumber) {
-  return episodeSlots.episodeByKey(project, episodeNumber)?.activeFiles?.outline
+  const own = episodeSlots.episodeByKey(project, episodeNumber)?.activeFiles?.outline
     || (Number(project.currentEpisode) === Number(episodeNumber) ? project.activeFiles?.outline : '')
-    || project.activeFiles?.outline
     || '';
+  if (own && (isSharedOutlineFile(own) || episodeNumberFromFileName(path.basename(own)) === episodeSlots.baseNumber(episodeNumber))) {
+    return own;
+  }
+  const globalOutline = project.activeFiles?.outline || '';
+  return isSharedOutlineFile(globalOutline) ? globalOutline : '';
 }
 
 function workflowTemplateFor(project, step, promptMode) {
@@ -701,11 +845,18 @@ function ensureSeasonPlan(project) {
   return project;
 }
 
-function applyDetectedSeasonRange(project, files) {
+function applyDetectedSeasonRange(project, files, workFiles = []) {
+  if (project.season?.manualRange === true) return;
   if (!files.length) return;
-  const detectedEpisodes = [...new Set(files
+  const positiveNumbers = list => [...new Set((list || [])
     .map((file) => Number(file.episodeNumber))
     .filter((episode) => Number.isFinite(episode) && episode > 0))];
+  const workEpisodes = positiveNumbers(workFiles);
+  const allEpisodes = positiveNumbers(files);
+  // Multi-season projects often keep the whole novel (chapters 1..550) in 00 小说原文
+  // while working only on a later season (e.g. EP 254..350). When production files
+  // start past episode 1, prefer their range over the full novel.
+  const detectedEpisodes = workEpisodes.length && Math.min(...workEpisodes) > 1 ? workEpisodes : allEpisodes;
   if (detectedEpisodes.length) {
     const detectedStart = Math.min(...detectedEpisodes);
     const detectedEnd = Math.max(...detectedEpisodes);
@@ -777,10 +928,28 @@ async function writeFileAtomically(filePath, content, options) {
   }
 }
 
+// Episode documents live in the project folder and local checks are recomputed
+// in a background worker on load/tab-switch; keeping per-episode copies of
+// full text or check findings bloats the index and goes stale after external
+// edits. User-confirmed/dismissed checks (confirmedChecks) are preserved.
+const episodeDocumentKinds = ['outline', 'script', 'shotlist', 'storyboard'];
+function stripEpisodeDocumentText(project) {
+  for (const episode of Array.isArray(project?.episodes) ? project.episodes : []) {
+    for (const kind of episodeDocumentKinds) {
+      const document = episode?.[kind];
+      if (!document || typeof document !== 'object') continue;
+      if (Object.prototype.hasOwnProperty.call(document, 'content')) delete document.content;
+      if (Object.prototype.hasOwnProperty.call(document, 'checks')) delete document.checks;
+    }
+  }
+  return project;
+}
+
 async function initStore() {
   storePath = path.join(app.getPath('userData'), 'director-theater-store.json');
   projectStore = require('./project-store').createProjectStore({ filePath: storePath, writeAtomic: writeFileAtomically });
   store = await projectStore.load();
+  for (const project of store.projects || []) stripEpisodeDocumentText(project);
 }
 
 const membershipProtectedChannels = new Set([
@@ -788,11 +957,13 @@ const membershipProtectedChannels = new Set([
   'production:execute', 'workflow:batch-state', 'production:act',
   'projects:create', 'projects:rescan', 'projects:save',
   'source:import', 'documents:save', 'documents:export-word', 'documents:replace-project-text',
-  'assets:add', 'assets:organize-role', 'rules:import', 'rules:save-prompt-template',
+  'assets:add', 'assets:organize-role', 'assets:import-manifest', 'assets:bind-root', 'assets:unbind-root', 'rules:import', 'rules:save-prompt-template',
   'rules:save-settings', 'references:import', 'episodes:finalize-output', 'episodes:discard-revisions',
   'tasks:prepare', 'batches:preview', 'workflow:prepare', 'workflow:execute', 'workflow:choose-template',
   'chatgpt:open', 'chatgpt:send', 'chatgpt:capture', 'chatgpt:archive', 'chatgpt:download-latest',
   'chatgpt:execute', 'chrome:reset', 'chrome:open-permission',
+  'image:config-save',
+  'asset-batch:create', 'asset-batch:run', 'asset-batch:accept', 'asset-batch:accept-many', 'asset-batch:adopt', 'asset-batch:retry', 'asset-batch:retry-deferred', 'asset-batch:publish', 'asset-batch:pause', 'codex-queue:prepare', 'codex-queue:prepare-ai', 'codex-queue:build-from-registry',
   'ai:save-config', 'ai:test', 'ai:batch', 'ai:clear-batch-state', 'ai:preview-messages'
   , 'review:act', 'review:choose-folder'
 ]);
@@ -828,6 +999,7 @@ async function persistStore() {
 
 async function writeProject(project, { ensureFolders = true, updateTimestamp = true } = {}) {
   if (updateTimestamp) project.updatedAt = now();
+  stripEpisodeDocumentText(project);
   ensureSeasonPlan(project);
   project.workflowTemplates = normalizeWorkflowTemplates(project.workflowTemplates);
   project.documentFormats = normalizeDocumentFormats(project.documentFormats);
@@ -844,7 +1016,9 @@ async function writeProject(project, { ensureFolders = true, updateTimestamp = t
       await ensureDirectory(path.join(project.folders.assets, 'images', folder));
     }
   }
-  await writeFileAtomically(path.join(project.folders.state, 'project.json'), JSON.stringify(project, null, 2), 'utf8');
+  await localSecrets.saveProjectSecrets(project);
+  const projectToPersist = localSecrets.stripProjectSecrets(project);
+  await writeFileAtomically(path.join(project.folders.state, 'project.json'), JSON.stringify(projectToPersist, null, 2), 'utf8');
   projectSessions.invalidate(project.projectPath);
 }
 
@@ -854,15 +1028,28 @@ async function hydrateProject(project) {
     path.join(selectedProjectPath, '.ai-director', 'project.json'),
     path.join(selectedProjectPath, 'project.json')
   ];
+  const fallbackProblems = [];
   for (const candidate of candidates) {
+    let raw;
     try {
-      const diskProject = JSON.parse(await fs.readFile(candidate, 'utf8'));
+      raw = await fs.readFile(candidate, 'utf8');
+      const diskProject = stripEpisodeDocumentText(JSON.parse(raw.replace(/^\uFEFF/, '')));
       relocateProjectReferences(diskProject, diskProject.projectPath, selectedProjectPath);
       // A copied .ai-director folder may still contain the previous computer's
       // drive path. The folder that was selected in the app is always the
       // source of truth, especially for shared drives.
       const pendingLocal = store.pendingProjectWrites?.[normalizedPath(selectedProjectPath)]
         && Date.parse(project.updatedAt) > Date.parse(diskProject.updatedAt || 0);
+      if (pendingLocal) {
+        runtimeSupport.record('project-metadata-pending-local', {
+          projectPath: selectedProjectPath, localUpdatedAt: project.updatedAt, diskUpdatedAt: diskProject.updatedAt || ''
+        });
+        broadcastWorkspace('projects:notice', {
+          projectPath: selectedProjectPath,
+          level: 'info',
+          message: '检测到上次未同步到项目文件夹的本地记录，已保留较新的本地记录并准备重新同步。'
+        });
+      }
       const hydrated = { ...project, ...diskProject, ...(pendingLocal ? project : {}),
         id: diskProject.id || project.id || uid(), projectPath: selectedProjectPath };
       hydrated.folders = makeFolderMap(selectedProjectPath);
@@ -885,14 +1072,32 @@ async function hydrateProject(project) {
         ? hydrated.generationMode
         : (hydrated.aiRunner?.mode === 'api' ? 'api' : hydrated.chatGptRunner.mode);
       hydrated.aiRunner = aiCore.normalizeRunnerConfig(hydrated);
+      await localSecrets.hydrateProjectSecrets(hydrated);
       hydrated.validationChecks = { ...aiCore.defaultValidationChecks(), ...(hydrated.validationChecks || {}) };
       hydrated.workflowTemplates = normalizeWorkflowTemplates(hydrated.workflowTemplates);
       hydrated.chatGptRunner.waitMinutes = Number(hydrated.chatGptRunner.waitMinutes) === 30 ? 30 : 50;
       hydrated.chatGptRunner.replyMode = normalizeChatGptReplyMode(hydrated.chatGptRunner.replyMode);
       return ensureSeasonPlan(hydrated);
-    } catch {
-      // Continue to the fallback state location.
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') continue;
+      let preservedPath = '';
+      if (raw !== undefined) {
+        preservedPath = candidate + '.corrupt-' + new Date().toISOString().replace(/[:.]/g, '-');
+        await fs.copyFile(candidate, preservedPath).catch(() => { preservedPath = ''; });
+      }
+      runtimeSupport.record('project-metadata-fallback', {
+        projectPath: selectedProjectPath, candidate, code: error?.code || '', preservedPath,
+        message: error?.message || String(error)
+      });
+      fallbackProblems.push({ candidate, corrupt: raw !== undefined, preservedPath, message: error?.message || String(error) });
     }
+  }
+  if (fallbackProblems.length) {
+    const problem = fallbackProblems[0];
+    const message = problem.corrupt
+      ? `项目文件夹内的 project.json 损坏，已暂用本机记录打开${problem.preservedPath ? `（原文件已备份为 ${path.basename(problem.preservedPath)}）` : ''}。`
+      : `无法读取项目文件夹内的 project.json（${problem.message}），已暂用本机记录打开，请注意核对。`;
+    broadcastWorkspace('projects:notice', { projectPath: selectedProjectPath, level: 'warning', message, preservedPath: problem.preservedPath });
   }
   return {
     ...project,
@@ -1029,7 +1234,9 @@ async function assetEpisodeUsage(project, assets) {
   });
 }
 
-async function scanAssetLibrary(project) {
+async function scanAssetLibrary(project, episodeNumber) {
+  // Archive cards contain machine-local paths. Keep them out of the saved project.
+  if (episodeNumber != null) return archiveLibrary.read(project, Number(episodeNumber), project.assets || []);
   const folders = makeFolderMap(project.projectPath);
   const imagesRoot = path.join(folders.assets, 'images');
   const audioRoot = path.join(folders.assets, 'audio');
@@ -1089,8 +1296,21 @@ function assetPromptTitle(line) {
 }
 
 function parseAssetPromptEntries(content, episodeNumber) {
+  const normalizedContent = String(content || '').replace(/^\uFEFF/, '');
+  const blocks = normalizedContent.split(/^【([^\n｜】]+)｜([^\n】]+)】\s*$/gm);
+  if (blocks.length > 1) {
+    const cards = [];
+    for (let index = 1; index < blocks.length; index += 3) {
+      const body = blocks[index + 2];
+      const usage = /^使用集[ \t　]+(.+)$/m.exec(body)?.[1];
+      const prompt = /【可投喂提示词】\s*([\s\S]+)/.exec(body)?.[1].trim();
+      if (prompt && usage && assetPromptAppliesToEpisode(usage, episodeNumber))
+        cards.push({ id: blocks[index], name: blocks[index + 1], variant: '', appliesTo: '使用集 ' + usage, prompt });
+    }
+    if (cards.length || /^使用集[ \t　]+/m.test(normalizedContent)) return cards;
+  }
   const entries = [];
-  const lines = String(content || '').replace(/^\uFEFF/, '').split(/\r?\n/);
+  const lines = normalizedContent.split(/\r?\n/);
   let assetName = '';
   let current = null;
   const finishCurrent = () => {
@@ -1110,10 +1330,11 @@ function parseAssetPromptEntries(content, episodeNumber) {
     }
     if (/适用[：:]/.test(line)) {
       finishCurrent();
-      if (assetPromptAppliesToEpisode(line, episodeNumber)) {
+      if (assetPromptAppliesToEpisode(line.split(/适用[：:]/).at(-1), episodeNumber)) {
         current = {
-          name: assetName || assetPromptTitle(line) || '未命名素材',
-          variant: assetPromptTitle(line) || '当前集版本',
+          id: /^([A-Za-z0-9_-]+)｜/.exec(line)?.[1] || '',
+          name: (assetName || assetPromptTitle(line)).replace(/^[A-Za-z0-9_-]+｜/, '') || '未命名素材',
+          variant: assetPromptTitle(line).replace(/^[A-Za-z0-9_-]+｜/, '') || '当前集版本',
           appliesTo: line
             .replace(/^[-•\s]*/, '')
             .match(/[（(].*[)）]/)?.[0]
@@ -1171,14 +1392,15 @@ async function readTextDocument(filePath) {
     await membershipService.assertCanUseBuiltinTemplates();
     return decryptTemplateFile(filePath);
   }
-  if (path.extname(filePath).toLowerCase() === '.docx') return (await mammoth.extractRawText({ path: filePath })).value;
+  if (path.extname(filePath).toLowerCase() === '.docx') return normalizeDocxRawText((await getMammoth().extractRawText({ path: filePath })).value);
   return fs.readFile(filePath, 'utf8');
 }
 
 async function writeTextDocx(content, outputPath) {
+  const { Document, Packer, Paragraph, TextRun } = getDocx();
   const lines = String(content || '').replace(/^\uFEFF/, '').split(/\r?\n/);
   const paragraphs = (lines.length ? lines : ['']).map((line) => new Paragraph({
-    children: [new TextRun(line || ' ')]
+    children: line ? [new TextRun(line)] : []
   }));
   const document = new Document({ sections: [{ children: paragraphs }] });
   await writeFileAtomically(outputPath, await Packer.toBuffer(document));
@@ -1290,7 +1512,8 @@ async function scanProjectFolder(project) {
   // project must not evict the other project's verified document reads.
   for (const [directory, files] of [[project.folders.outline, outlineFiles], [project.folders.script, scriptFiles],
       [project.folders.storyboard, boardFiles], [project.folders.seedance, seedanceFiles]]) episodeFileIndex.seed(directory, files);
-  applyDetectedSeasonRange(project, [...sourceFiles, ...outlineFiles, ...scriptFiles, ...seedanceFiles]);
+  const workFiles = [...outlineFiles, ...scriptFiles, ...boardFiles, ...seedanceFiles];
+  applyDetectedSeasonRange(project, [...sourceFiles, ...workFiles], workFiles);
   project.assets = await scanAssetLibrary(project);
   return ensureSeasonPlan(project);
 }
@@ -1312,8 +1535,8 @@ async function loadEpisodeDocuments(project, episodeNumber) {
       if (!Array.isArray(files)) return null;
       const selected = episodeSlots.episodeByKey(project, episodeNumber)?.activeFiles?.[kind];
       const match = chooseEpisodeFile(files, project, kind, episodeNumber)
-        || (kind === 'outline' ? files.find(file => file.path === selectedPathForOutline(project, episodeNumber)) || (files.length === 1 ? files[0] : null)
-          : selected ? files.find(file => file.path === selected && episodeNumberFromFileName(file.name) === null) : null);
+        || (kind === 'outline' ? files.find(file => file.path === selectedPathForOutline(project, episodeNumber)) || (files.length === 1 && isSharedOutlineFile(files[0].path) ? files[0] : null)
+          : selected ? files.find(file => path.resolve(file.path).toLowerCase() === path.resolve(selected).toLowerCase() && episodeNumberFromFileName(file.name) === null) : null);
       if (!match || !fileIsInsideDirectory(match.path, folders[folderKinds[kind]]) || !fileMatchesDocumentFormat(match.path, documentFormatForKind(project, kind))) return null;
       try { return await episodeDocumentCache.read(match.path); }
       catch { return null; }
@@ -1335,12 +1558,14 @@ async function loadEpisodeDocuments(project, episodeNumber) {
     listForKind(folders.seedance, 'storyboard')
   ]);
   const readMatch = async (files, kind) => {
+    const selected = episodeSlots.episodeByKey(project, episodeNumber)?.activeFiles?.[kind];
+    const selectedOutline = kind === 'outline' ? selectedPathForOutline(project, episodeNumber) : '';
     const match = kind === 'outline'
       ? chooseEpisodeFile(files, project, kind, episodeNumber)
-        || files.find((file) => selectedPathForOutline(project, episodeNumber)
-          && path.resolve(file.path).toLowerCase() === path.resolve(selectedPathForOutline(project, episodeNumber)).toLowerCase())
-        || (files.length === 1 ? files[0] : null)
-      : chooseEpisodeFile(files, project, kind, episodeNumber);
+        || (selectedOutline && files.find((file) => path.resolve(file.path).toLowerCase() === path.resolve(selectedOutline).toLowerCase()))
+        || (files.length === 1 && isSharedOutlineFile(files[0].path) ? files[0] : null)
+      : chooseEpisodeFile(files, project, kind, episodeNumber)
+        || (selected ? files.find((file) => path.resolve(file.path).toLowerCase() === path.resolve(selected).toLowerCase() && episodeNumberFromFileName(file.name) === null) : null);
     if (!match) return null;
     try {
       return await episodeDocumentCache.read(match.path);
@@ -1983,22 +2208,29 @@ function validateStoryboardLegacy(content, script = '', shotlist = '') {
 }
 
 async function exportProject(project, type, target = 'storyboard') {
+  if (activeGlobalTextSearch) throw new Error('当前正在执行全局查找替换，请完成后再导出。');
   const isScript = target === 'script';
-  const baseName = episodeFileStem(project);
-  const outputDirectory = isScript ? outputFolderForTask(project, { kind: 'script' }) : outputFolderForTask(project, { kind: 'storyboard' });
+  const kind = isScript ? 'script' : 'storyboard';
+  const content = String(isScript ? project.script?.content || '' : project.storyboard?.content || '');
+  if (!content.trim()) throw new Error('当前内容为空，无法导出。');
+  const outputDirectory = outputFolderForTask(project, { kind });
   await ensureDirectory(outputDirectory);
-  const content = isScript ? project.script.content : project.storyboard.content;
-  const markdown = `# ${project.title} · 第${project.currentEpisode}集 · ${isScript ? '剧本' : 'Seedance提示词'}\n\n${content || '（尚未生成）'}\n`;
+  const active = project.activeFiles?.[kind] || '';
+  const activeInside = active && fileIsInsideDirectory(active, outputDirectory);
+  const baseName = activeInside ? path.basename(active, path.extname(active)) : episodeFileStem(project);
+  const episodeLabel = episodeSlots.label(project, project.currentEpisode);
+  const markdown = `# ${project.title} · 第${episodeLabel}集 · ${isScript ? '剧本' : 'Seedance提示词'}\n\n${content}\n`;
   let outputPath;
   if (type === 'txt') {
     outputPath = path.join(outputDirectory, `${baseName}.txt`);
-    await writeFileAtomically(outputPath, content || '（尚未生成）', 'utf8');
+    await writeFileAtomically(outputPath, content, 'utf8');
   } else if (type === 'docx') {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = getDocx();
     outputPath = path.join(outputDirectory, `${baseName}.docx`);
     const paragraphs = markdown.split(/\r?\n/).map((line) => {
       if (line.startsWith('# ')) return new Paragraph({ text: line.slice(2), heading: HeadingLevel.TITLE });
       if (line.startsWith('## ')) return new Paragraph({ text: line.slice(3), heading: HeadingLevel.HEADING_1 });
-      return new Paragraph({ children: [new TextRun(line || ' ')] });
+      return new Paragraph({ children: line ? [new TextRun(line)] : [] });
     });
     const file = new Document({ sections: [{ children: paragraphs }] });
     await writeFileAtomically(outputPath, await Packer.toBuffer(file));
@@ -2066,7 +2298,8 @@ function projectDocumentOutputPath(project, kind, activePath = '') {
   const desiredExtension = extensionForDocumentFormat(format);
   const activeExtension = path.extname(activePath).toLowerCase();
   const activeEpisode = episodeNumberFromFileName(path.basename(activePath || ''));
-  const isCurrentEpisodeFile = kind === 'outline' || (activeEpisode === null && (kind === 'source' || episodeSlots.partForKey(project, project.currentEpisode) !== '下'))
+  const isCurrentEpisodeFile = (kind === 'outline' && isSharedOutlineFile(activePath))
+    || (activeEpisode === null && (kind === 'source' || kind === 'outline' || episodeSlots.partForKey(project, project.currentEpisode) !== '下'))
     || (activeEpisode === episodeSlots.baseNumber(project.currentEpisode)
     && episodeSlots.matchingPart(project, project.currentEpisode, path.basename(activePath), kind === 'source'));
   const activeMatchesFormat = fileMatchesDocumentFormat(activePath, format);
@@ -2113,8 +2346,10 @@ async function replaceProjectTextFiles(project, findText, replaceText, previewOn
   const search = require('./global-text-search');
   const operation = { controller: new AbortController(), phase: 'scan' };
   activeGlobalTextSearch = operation;
+  const targetSender = ipcWindowContext.getStore()?.sender || activeWorkspaceWindow()?.webContents;
   const notify = event => {
-    activeWorkspaceWindow()?.webContents.send('documents:search-progress', event);
+    const recipient = targetSender && !targetSender.isDestroyed?.() ? targetSender : activeWorkspaceWindow()?.webContents;
+    if (recipient && !recipient.isDestroyed?.()) recipient.send('documents:search-progress', event);
   };
   try {
     const plan = await search.runSearch({ projectPath: project.projectPath,
@@ -2328,6 +2563,13 @@ function createChatWindow() {
     width: 1160,
     height: 820,
     webPreferences: { partition: 'persist:manju-chatgpt', contextIsolation: true, sandbox: true }
+  });
+  chatGptWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(String(url || ''))) return { action: 'allow' };
+    return { action: 'deny' };
+  });
+  chatGptWindow.webContents.on('will-navigate', (event, url) => {
+    if (!/^https:\/\//i.test(String(url || ''))) event.preventDefault();
   });
   chatGptWindow.loadURL('https://chatgpt.com/');
   chatGptWindow.on('closed', () => { chatGptWindow = null; });
@@ -3873,8 +4115,10 @@ async function finalizeEpisodeOutput(project, kind) {
   const format = documentFormatForKind(project, kind);
   const outputPath = path.join(directory, `${stem}${extensionForDocumentFormat(format)}`);
   await writeEditableDocument(outputPath, content);
+  const persistedContent = await readTextDocument(outputPath);
+  const workspaceVersion = crypto.createHash('sha256').update(String(persistedContent)).digest('hex');
   const docxPath = format === 'docx' ? outputPath : '';
-  return { outputPath, plainTextPath: format === 'docx' ? '' : outputPath, docxPath, stem, format };
+  return { outputPath, plainTextPath: format === 'docx' ? '' : outputPath, docxPath, stem, format, path: outputPath, content: persistedContent, workspaceVersion };
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -4130,7 +4374,9 @@ function installIpc() {
     const relative = {relationships:'06 资产/人物关系网.html',assets:'06 资产/资产与图片提示词.html',reports:'检查报告',outputs:''}[kind];
     if (relative === undefined) throw Error('未知输出类型。');
     const destination = path.join(project.projectPath,relative);
-    await fs.access(destination); const error = await shell.openPath(destination); if(error) throw Error(error); return true;
+    if (kind === 'reports' || kind === 'outputs') await fs.mkdir(destination, { recursive: true });
+    try { await fs.access(destination); } catch { throw Error(`尚未生成对应成果文件：${relative || '项目目录'}，请先运行自动制作。`); }
+    const error = await shell.openPath(destination); if(error) throw Error(error); return true;
   });
   registerIpcHandle('quality:check', async (_event,{project,input}) => {
     assertGenerationIdle();
@@ -4173,8 +4419,18 @@ function installIpc() {
   });
   registerIpcHandle('membership:status', () => membershipService.status());
   registerIpcHandle('membership:activate', (_event, token) => membershipService.activateToken(token));
+  registerIpcHandle('membership:paste-activate', () => {
+    const text = clipboard.readText();
+    if (!String(text || '').trim()) throw new Error('剪贴板是空的，请先复制管理员发给你的激活码。');
+    return membershipService.activateToken(text);
+  });
+  registerIpcHandle('membership:read-clipboard', () => String(clipboard.readText() || '').trim());
   registerIpcHandle('membership:import', () => membershipService.importLicense());
   registerIpcHandle('membership:remove-license', () => membershipService.removeLicense());
+  registerIpcHandle('membership:admin-status', () => membershipService.localAdminStatus());
+  registerIpcHandle('membership:admin-self-activate', (_event, plan) => membershipService.adminSelfActivate(plan));
+  registerIpcHandle('membership:admin-issue', (_event, input) => membershipService.adminIssueLicense(input));
+  registerIpcHandle('membership:admin-save-file', (_event, input) => membershipService.adminSaveLicenseFile(input));
   registerIpcHandle('templates:list', async () => {
     await membershipService.assertCanUseBuiltinTemplates();
     return listBuiltinTemplates();
@@ -4315,7 +4571,7 @@ function installIpc() {
   registerIpcHandle('projects:save', async (_event, project, options = {}) => {
     const index = store.projects.findIndex((item) => item.id === project.id);
     if (index === -1) throw new Error('找不到需要保存的项目');
-    const next = { ...project, updatedAt: now() };
+    const next = stripEpisodeDocumentText({ ...project, updatedAt: now() });
     const previous = store.projects[index];
     const writeKey = normalizedPath(next.projectPath);
     const previousPending = store.pendingProjectWrites?.[writeKey];
@@ -4371,7 +4627,157 @@ function installIpc() {
   });
   registerIpcHandle('assets:add', async (_event, { project, category }) => addAsset(project, category));
   registerIpcHandle('assets:refresh', async (_event, project) => scanAssetLibrary(project));
-  registerIpcHandle('assets:prompt-library', async (_event, { project, episodeNumber }) => loadAssetPromptLibrary(project, episodeNumber));
+  registerIpcHandle('assets:prompt-library', async (_event, { project, episodeNumber }) => {
+    const [prompts, archive] = await Promise.all([
+      loadAssetPromptLibrary(project, episodeNumber), scanAssetLibrary(project, episodeNumber)
+    ]);
+    return { ...prompts, ...archive, projectPath: project.projectPath };
+  });
+  registerIpcHandle('image:providers', () => imageProviders.list());
+  registerIpcHandle('image:config-get', () => publicImageRunnerConfig());
+  registerIpcHandle('image:config-save', async (_event, patch) => saveLocalImageRunnerConfig(patch));
+  registerIpcHandle('asset-batch:choose-queue', async () => {
+    const choice = await dialog.showOpenDialog(activeWorkspaceWindow(), {
+      title: '选择资产生成队列', properties: ['openFile'],
+      filters: [{ name: '资产队列 JSON', extensions: ['json'] }]
+    });
+    if (choice.canceled) return null;
+    const filePath = choice.filePaths[0];
+    const queue = JSON.parse((await fs.readFile(filePath, 'utf8')).replace(/^\uFEFF/, ''));
+    return { path: filePath, name: path.basename(filePath), queue };
+  });
+  registerIpcHandle('asset-batch:choose-image', async () => {
+    const choice = await dialog.showOpenDialog(activeWorkspaceWindow(), {
+      title: '选择要替换的 PNG 图片', properties: ['openFile'],
+      filters: [{ name: 'PNG 图片', extensions: ['png'] }]
+    });
+    if (choice.canceled) return null;
+    const filePath = choice.filePaths[0];
+    return { path: filePath, bytes: await fs.readFile(filePath) };
+  });
+  registerIpcHandle('asset-batch:list', async (_event, project) => assetBatches.list(project));
+  registerIpcHandle('asset-batch:status', async (_event, { project, batchId }) => assetBatches.inspect(project, batchId));
+  registerIpcHandle('asset-batch:preview', async (_event, { project, batchId, jobId, thumbnail }) => assetBatches.preview(project, batchId, jobId, { thumbnail: Boolean(thumbnail) }));
+  registerIpcHandle('asset-batch:create', async (_event, { project, batchId, queue, model, providerId, referenceFiles, sourceDir }) => {
+    const id = String(batchId || '').trim() || `batch-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    await assetBatches.create(project, id, queue, { model, provider_id: providerId || '', referenceFiles, sourceDir });
+    return { id, ...(await assetBatches.inspect(project, id)) };
+  });
+  registerIpcHandle('asset-batch:run', async (event, { project, batchId, providerId, concurrency, ids, resume }) => {
+    assertGenerationIdle();
+    const driver = imageProviders.get(providerId);
+    const result = await keepComputerAwakeWhileWorking(() => assetBatches.run(project, batchId, driver, {
+      owner: event.sender.id, concurrency, ids, resume,
+      onProgress: snapshot => {
+        if (!event.sender.isDestroyed()) event.sender.send('asset-batch:event', { projectPath: project.projectPath, ...snapshot });
+      }
+    }));
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('asset-batch:accept', async (event, { project, batchId, jobId }) => {
+    const result = await assetBatches.accept(project, batchId, jobId);
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('asset-batch:accept-many', async (event, { project, batchId, ids }) => {
+    const result = await assetBatches.acceptMany(project, batchId, ids);
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('asset-batch:adopt', async (event, { project, batchId, jobId, bytes, actualModel }) => {
+    const result = await assetBatches.adopt(project, batchId, jobId, Buffer.from(bytes), actualModel);
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('asset-batch:retry', async (event, { project, batchId, jobId, reason, prompt }) => {
+    const result = await assetBatches.retry(project, batchId, jobId, { reason, prompt });
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('asset-batch:retry-deferred', async (event, { project, batchId, ids }) => {
+    const result = await assetBatches.retryDeferred(project, batchId, ids);
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('asset-batch:publish', async (event, { project, batchId, ids }) => {
+    const result = await assetBatches.publish(project, batchId, ids, event.sender.id);
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    broadcastWorkspace('workspace:changed', { type: 'asset-archive', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('asset-batch:pause', async (event, { project, batchId }) => {
+    const result = await assetBatches.pause(project, batchId);
+    broadcastWorkspace('workspace:changed', { type: 'asset-batch', projectPath: project.projectPath }, event.sender.id);
+    return result;
+  });
+  registerIpcHandle('codex-queue:discover', async (_event, payload = {}) => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    const preferredPath = String(payload?.preferredPath ?? cfg.codexPath ?? '').trim();
+    return codexQueue.discover({ preferredPath });
+  });
+  registerIpcHandle('codex-queue:prepare', async (event, { project, episode, scriptFile, model, codexPath, reasoningEffort, allowCompatibilityFallback, timeoutMs }) => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    return keepComputerAwakeWhileWorking(() => codexQueue.prepare(project, {
+      owner: event.sender.id,
+      episode,
+      scriptFile,
+      model: model || cfg.codexModel || '',
+      codexPath: codexPath || cfg.codexPath || '',
+      reasoningEffort: reasoningEffort || cfg.codexReasoningEffort || 'low',
+      allowCompatibilityFallback: allowCompatibilityFallback !== false,
+      timeoutMs,
+      onEvent: payload => {
+        if (!event.sender.isDestroyed()) event.sender.send('codex-queue:event', payload);
+      }
+    }));
+  });
+  registerIpcHandle('codex-queue:cancel', (_event, runId) => codexQueue.cancel(runId));
+  registerIpcHandle('magpie:detect', async (_event, baseUrl = '') => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    return codexQueue.detectMagpie(baseUrl || cfg.magpieBaseUrl || process.env.MAGPIE_ADDR || 'http://127.0.0.1:3425');
+  });
+  registerIpcHandle('codex-queue:prepare-ai', async (event, { project, episode, scriptFile, source, model, magpieBaseUrl, timeoutMs }) => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    return keepComputerAwakeWhileWorking(() => codexQueue.prepareViaAi(project, {
+      owner: event.sender.id,
+      episode,
+      scriptFile,
+      source: source || 'auto',
+      model: model || cfg.magpieTextModel || '',
+      magpieBaseUrl: magpieBaseUrl || cfg.magpieBaseUrl || '',
+      timeoutMs,
+      onEvent: payload => {
+        if (!event.sender.isDestroyed()) event.sender.send('codex-queue:event', payload);
+      }
+    }));
+  });
+  registerIpcHandle('codex-queue:build-from-registry', async (_event, { project, episode }) => {
+    const reg = await automationService.registry(project);
+    const queue = codexQueue.buildQueueFromRegistry(reg, { projectTitle: project.title || '', episode });
+    return { queue, episode: episode || null, totalAssets: reg.assets?.length || 0 };
+  });
+  registerIpcHandle('assets:archive-info', async (_event, project) => archiveLibrary.info(project));
+  registerIpcHandle('assets:unbind-root', async (event, project) => {
+    await archiveLibrary.unbind(project);
+    broadcastWorkspace('workspace:changed', { type: 'asset-archive', projectPath: project.projectPath }, event.sender.id);
+    return archiveLibrary.info(project);
+  });
+  registerIpcHandle('assets:import-manifest', async (event, project) => {
+    const choice = await dialog.showOpenDialog(activeWorkspaceWindow(), { title: '导入归档清单', properties: ['openFile'],
+      filters: [{ name: '归档清单或单图回执', extensions: ['json'] }] });
+    if (choice.canceled) return null;
+    const count = await archiveLibrary.importFile(project, choice.filePaths[0]);
+    broadcastWorkspace('workspace:changed', { type: 'asset-archive', projectPath: project.projectPath }, event.sender.id);
+    return count;
+  });
+  registerIpcHandle('assets:bind-root', async (event, project) => {
+    const choice = await dialog.showOpenDialog(activeWorkspaceWindow(), { title: '绑定本机归档根目录', properties: ['openDirectory'] });
+    if (choice.canceled) return null;
+    await archiveLibrary.bind(project, choice.filePaths[0]);
+    broadcastWorkspace('workspace:changed', { type: 'asset-archive', projectPath: project.projectPath }, event.sender.id);
+    return true;
+  });
   registerIpcHandle('assets:organize-role', async (_event, { project, assetId }) => organizeRoleAsset(project, assetId));
   ipcMain.on('assets:start-drag', (event, filePath) => {
     const resolved = path.resolve(String(filePath || ''));
@@ -4447,9 +4853,31 @@ function installIpc() {
     stopChromeMcpClient();
     return openChromePermissionPage();
   });
-  registerIpcHandle('ai:providers', () => Object.entries(aiCore.PROVIDERS).map(([id, preset]) => ({
-    id, label: preset.label, baseUrl: preset.baseUrl, models: preset.models, modelNotes: preset.modelNotes || {}
-  })));
+  registerIpcHandle('ai:providers', async () => {
+    const cfg = loadLocalImageRunnerConfigSync();
+    const magpieProbe = await codexQueue.detectMagpie(cfg.magpieBaseUrl || process.env.MAGPIE_ADDR || 'http://127.0.0.1:3425').catch(() => ({ online: false, textModels: [] }));
+    return Object.entries(aiCore.PROVIDERS).map(([id, preset]) => {
+      if (id === 'magpie' && magpieProbe.online && magpieProbe.textModels.length) {
+        return {
+          id,
+          label: `${preset.label} · 在线`,
+          baseUrl: magpieProbe.v1BaseUrl || preset.baseUrl,
+          models: [...new Set([...magpieProbe.textModels, ...preset.models])],
+          modelNotes: preset.modelNotes || {},
+          localGateway: true,
+          online: true
+        };
+      }
+      return {
+        id,
+        label: preset.label,
+        baseUrl: preset.baseUrl,
+        models: preset.models,
+        modelNotes: preset.modelNotes || {},
+        localGateway: Boolean(preset.localGateway)
+      };
+    });
+  });
   registerIpcHandle('ai:checks', () => aiCore.VALIDATION_CHECKS.map(({ id, label, scope, severity, desc }) => ({ id, label, scope, severity, desc })));
   registerIpcHandle('ai:config', (_event, project) => aiCore.normalizeRunnerConfig(project));
   registerIpcHandle('ai:save-config', (_event, { project, runner }) => aiCore.normalizeRunnerConfig({ aiRunner: { ...(project.aiRunner || {}), ...(runner || {}) } }));
@@ -4467,13 +4895,88 @@ function installIpc() {
     aiCore.validateStructure(kind, String(content || ''), { checks }));
 }
 
+function installApplicationMenu() {
+  if (!Menu?.buildFromTemplate) return;
+  const version = app.getVersion?.() || require('../package.json').version;
+  const template = [
+    {
+      label: '文件',
+      submenu: [
+        { label: '新建独立窗口', accelerator: 'CmdOrCtrl+Shift+N', click: () => { void workspaceWindows?.create?.({}, BrowserWindow.getFocusedWindow()?.webContents); } },
+        { type: 'separator' },
+        { label: '关闭窗口', role: 'close' },
+        { label: '退出导演台剧场', role: 'quit' }
+      ]
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { label: '撤销', role: 'undo' },
+        { label: '重做', role: 'redo' },
+        { type: 'separator' },
+        { label: '剪切', role: 'cut' },
+        { label: '复制', role: 'copy' },
+        { label: '粘贴', role: 'paste' },
+        { label: '全选', role: 'selectAll' }
+      ]
+    },
+    {
+      label: '视图',
+      submenu: [
+        { label: '重新加载', role: 'reload' },
+        { type: 'separator' },
+        { label: '实际大小', role: 'resetZoom' },
+        { label: '放大', role: 'zoomIn' },
+        { label: '缩小', role: 'zoomOut' },
+        { type: 'separator' },
+        { label: '切换全屏', role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: '帮助',
+      submenu: [
+        { label: '打开项目主页与文档', click: () => { void shell.openExternal('https://github.com/shanxixi0329-dev/DirectorTheater'); } },
+        { label: '打开本机数据与诊断日志目录', click: () => { void shell.openPath(app.getPath('userData')); } },
+        { type: 'separator' },
+        { label: '开发者工具（排障用）', accelerator: 'CmdOrCtrl+Shift+I', role: 'toggleDevTools' },
+        { type: 'separator' },
+        {
+          label: `关于导演台剧场 V${version}`,
+          click: () => {
+            const targetWin = BrowserWindow.getFocusedWindow() || mainWindow;
+            void dialog.showMessageBox(targetWin || undefined, {
+              type: 'info',
+              title: '关于导演台剧场',
+              message: `导演台剧场 · Director Theater V${version}`,
+              detail: `面向短剧与 AI 漫剧制作的本地桌面工作台。\n全部剧本与素材保留在你的本地目录，API 密钥与本机授权仅保存在本机用户目录。\n\nElectron ${process.versions.electron} · Node ${process.versions.node}`,
+              buttons: ['确定'],
+              noLink: true
+            });
+          }
+        }
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+process.on('uncaughtException', error => {
+  runtimeSupport.record('main-uncaught-exception', { message: error?.message || String(error), stack: String(error?.stack || '').slice(0, 1500) });
+  console.error('Main uncaughtException:', error);
+});
+process.on('unhandledRejection', reason => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  runtimeSupport.record('main-unhandled-rejection', { message, stack: reason instanceof Error ? String(reason.stack || '').slice(0, 1500) : '' });
+  console.error('Main unhandledRejection:', reason);
+});
+
 async function createMainWindow() {
   if (!workspaceWindows) workspaceWindows = require('./workspace-windows').createWorkspaceWindows({
-    BrowserWindow, screen, dialog, smokeMode,
+    BrowserWindow, screen, dialog, shell, smokeMode,
     beforeClose: async () => { await projectWrites.flush(); await persistStore(); },
-    isBusy: () => Boolean(activeAiWork || apiService.isBusy() || automationService.isBusy() || qualityService.isBusy() || directorService.isBusy() || assistantService.isBusy()),
-    isWindowBusy: win => Boolean(windowTaskCounts.get(win.webContents.id)),
-    cancelWork: () => { apiService.cancel(); automationService.cancel(); qualityService.cancel(); directorService.cancel(); assistantService.cancel(); },
+    isBusy: () => Boolean(assetBatches.isBusy() || codexQueue.isBusy() || activeAiWork || apiService.isBusy() || automationService.isBusy() || qualityService.isBusy() || directorService.isBusy() || assistantService.isBusy()),
+    isWindowBusy: win => Boolean(assetBatches.isWindowBusy(win.webContents.id) || codexQueue.isWindowBusy(win.webContents.id) || windowTaskCounts.get(win.webContents.id)),
+    cancelWork: () => { codexQueue.cancel(); apiService.cancel(); automationService.cancel(); qualityService.cancel(); directorService.cancel(); assistantService.cancel(); return assetBatches.stopAll(); },
     onClosed: (win, senderId) => {
       workspaceSync.release(senderId);
       if (mainWindow === win) mainWindow = workspaceWindows.live()[0]?.win;
@@ -4485,7 +4988,7 @@ async function createMainWindow() {
 app.on('will-quit', () => {
   projectSessions.clear();
   episodeFileIndex.clear(); episodeDocumentCache.clear(); backgroundDocumentChecks.close();
-  automationService.cancel(); qualityService.cancel(); directorService.cancel(); assistantService.cancel();
+  automationService.cancel(); qualityService.cancel(); directorService.cancel(); assistantService.cancel(); codexQueue.cancel();
   chromeMcpClient?.close();
   stopAiWakeBlocker();
   try {
@@ -4515,6 +5018,7 @@ app.whenReady().then(async () => {
     if (process.env.AI_DIRECTOR_FORMAT_SMOKE === '1') await runDocumentFormatSmokeChecks(scanned);
   }
   installIpc();
+  installApplicationMenu();
   await createMainWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
 }).catch((error) => {
@@ -4522,7 +5026,7 @@ app.whenReady().then(async () => {
   app.exit(1);
 });
 
-module.exports = { replaceProjectTextFiles, normalizeWorkflowTemplates, makeFolderMap, missingProjectFolders };
+module.exports = { replaceProjectTextFiles, normalizeWorkflowTemplates, makeFolderMap, missingProjectFolders, assetBatches };
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 

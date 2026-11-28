@@ -1,13 +1,17 @@
 'use strict';
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const appVersion = require('../package.json').version;
+const appIndexFile = path.join(__dirname, 'renderer/index.html');
+const appIndexUrl = pathToFileURL(appIndexFile).href;
 const labels = {
-  'director-home': '制作总览', 'shot-studio': '镜头工作台', generate: '生成', project: '项目文件',
+  'director-home': '制作总览', 'shot-studio': '镜头工作台', automation: '自动制作', generate: '生成', project: '项目文件',
   outline: '大纲', script: '剧本', shotlist: '分镜', storyboard: '提示词', 'quality-center': '检查与优化',
   assets: '素材', 'html-relationships': '人物关系网', 'html-assets': '素材可视化', 'html-post': '后期剪辑可视化',
   'html-other': '其他 HTML 资料', review: '审片', 'review-notes': '审片意见', rules: '规则与设置',
   home: '首页', workbench: '工作台', production: '制作', quality: '检查', export: '导出'
 };
-function createWorkspaceWindows({ BrowserWindow, screen, dialog, smokeMode, beforeClose, isBusy, isWindowBusy = () => false, cancelWork, onClosed }) {
+function createWorkspaceWindows({ BrowserWindow, screen, dialog, shell, smokeMode, beforeClose, isBusy, isWindowBusy = () => false, cancelWork, onClosed }) {
   const windows = new Map();
   let sequence = 0;
   const get = sender => [...windows.values()].find(entry => entry.win.webContents === sender);
@@ -26,7 +30,7 @@ function createWorkspaceWindows({ BrowserWindow, screen, dialog, smokeMode, befo
     if (!entry) return;
     entry.meta = { projectPath: String(value.projectPath || ''), title: String(value.title || '').slice(0, 150),
       view: labels[value.view] ? value.view : 'script', episode: String(value.episode || '').slice(0, 24), currentEpisode: Number(value.currentEpisode) || null };
-    entry.win.setTitle([entry.meta.title, entry.meta.episode ? '第' + entry.meta.episode + '集' : '', labels[entry.meta.view], '导演台剧场 V0.1.12'].filter(Boolean).join(' · '));
+    entry.win.setTitle([entry.meta.title, entry.meta.episode ? '第' + entry.meta.episode + '集' : '', labels[entry.meta.view], `导演台剧场 V${appVersion}`].filter(Boolean).join(' · '));
     announce();
   }
   async function create(input = {}, sender) {
@@ -46,7 +50,7 @@ function createWorkspaceWindows({ BrowserWindow, screen, dialog, smokeMode, befo
     const win = new BrowserWindow({ icon: path.join(__dirname, 'assets/brand-v008/app-icon.ico'),
       x: Math.round(x), y: Math.round(y), width, height, minWidth: Math.min(860, area.width), minHeight: Math.min(620, area.height),
       backgroundColor: '#151817', titleBarStyle: 'hiddenInset', show: false,
-      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false } });
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false, spellcheck: false, enableWebSQL: false, backgroundThrottling: true } });
     const entry = { win, bootstrap, meta: { view: bootstrap.view, projectPath: bootstrap.projectPath }, number: ++sequence, allowed: false, prompting: false };
     const senderId = win.webContents.id;
     windows.set(win.id, entry);
@@ -64,14 +68,17 @@ function createWorkspaceWindows({ BrowserWindow, screen, dialog, smokeMode, befo
       entry.prompting = true;
       void (async () => {
         try {
+          await win.webContents.executeJavaScript('typeof directorFlushEpisodePosition === "function" ? directorFlushEpisodePosition() : null').catch(() => {});
           const state = await win.webContents.executeJavaScript('typeof directorCloseState === "function" ? directorCloseState() : ({dirty:false,running:false})');
-          const last = live().length === 1;
-          if (state.running || isWindowBusy(win) || (last && isBusy())) {
-            const choice = await dialog.showMessageBox(win, { type: 'warning', title: '任务仍在运行', message: last ? '当前窗口仍有关联任务，关闭会中断任务。' : '当前窗口仍有关联任务，可以隐藏窗口并继续运行。',
-              buttons: ['继续运行', last ? '停止任务并关闭' : '隐藏窗口，后台运行'], defaultId: 0, cancelId: 0, noLink: true });
+          const visibleWindows = live().filter(item => item.win.isVisible());
+          const lastVisible = live().length === 1 || (win.isVisible() && visibleWindows.length <= 1);
+          const hiddenOthers = live().filter(item => item.win !== win && !item.win.isVisible());
+          if (state.running || isWindowBusy(win) || (live().length === 1 && isBusy())) {
+            const choice = await dialog.showMessageBox(win, { type: 'warning', title: '任务仍在运行', message: lastVisible ? '当前窗口仍有关联任务，关闭会中断任务。' : '当前窗口仍有关联任务，可以隐藏窗口并继续运行。',
+              buttons: ['继续运行', lastVisible ? '停止任务并关闭' : '隐藏窗口，后台运行'], defaultId: 0, cancelId: 0, noLink: true });
             if (choice.response !== 1) return;
-            if (!last) { win.hide(); return; }
-            cancelWork();
+            if (!lastVisible) { win.hide(); return; }
+            await cancelWork();
           }
           if (state.dirty) {
             const choice = await dialog.showMessageBox(win, { type: 'question', title: '保存修改后关闭窗口？',
@@ -81,6 +88,10 @@ function createWorkspaceWindows({ BrowserWindow, screen, dialog, smokeMode, befo
             if (choice.response === 0) await win.webContents.executeJavaScript('directorSaveBeforeClose()');
           }
           await beforeClose();
+          if (lastVisible && hiddenOthers.length) {
+            const nextWin = hiddenOthers[0].win;
+            if (!nextWin.isDestroyed()) { nextWin.show(); nextWin.focus(); }
+          }
           entry.allowed = true;
           win.close();
         } catch (error) {
@@ -112,10 +123,37 @@ function createWorkspaceWindows({ BrowserWindow, screen, dialog, smokeMode, befo
         } finally { entry.prompting = false; }
       })();
     });
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(String(url || ''))) void shell?.openExternal?.(url);
+      return { action: 'deny' };
+    });
+    win.webContents.on('will-navigate', (event, url) => {
+      const target = String(url || '');
+      if (target === appIndexUrl || target.startsWith(appIndexUrl + '?') || target.startsWith(appIndexUrl + '#')) return;
+      event.preventDefault();
+      if (/^https?:\/\//i.test(target)) void shell?.openExternal?.(target);
+    });
+    win.webContents.on('render-process-gone', (_event, detail) => {
+      if (smokeMode || process.env.DIRECTOR_THEATER_QA_USER_DATA || detail?.reason === 'clean-exit' || win.isDestroyed()) return;
+      void dialog.showMessageBox(win, {
+        type: 'error',
+        title: '工作台页面意外中断',
+        message: '当前界面进程异常退出，本地项目文件未受破坏。',
+        detail: `原因：${detail?.reason || 'unknown'}（退出码 ${detail?.exitCode ?? '-'}）`,
+        buttons: ['重新加载工作台', '关闭窗口'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      }).then(({ response }) => {
+        if (win.isDestroyed()) return;
+        if (response === 0) win.webContents.reload();
+        else { entry.allowed = true; win.close(); }
+      }).catch(() => {});
+    });
     win.webContents.on('did-finish-load', () => { entry.allowReload = false; });
     win.webContents.once('did-fail-load', (_event, code, description) => { if (smokeMode) { console.error(code, description); require('electron').app.exit(1); } });
     win.webContents.once('did-finish-load', () => { if (smokeMode) setTimeout(() => win.close(), 250); });
-    await win.loadFile(path.join(__dirname, 'renderer/index.html'));
+    await win.loadFile(appIndexFile);
     if (!smokeMode && !win.isDestroyed()) win.show();
     announce();
     return win;

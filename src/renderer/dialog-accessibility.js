@@ -58,7 +58,7 @@
     activeField = { id: event.target.id, start: event.target.selectionStart, end: event.target.selectionEnd };
   });
   document.addEventListener('keydown', event => {
-    if (!dialog || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
+    if (!dialog || event.isComposing || event.keyCode === 229 || event.defaultPrevented || document.querySelector('dialog[open]')) return;
     if (event.key === 'Escape') {
       const close = dialog.querySelector('.modal-close:not(:disabled)');
       if (close) { event.preventDefault(); event.stopPropagation(); close.click(); }

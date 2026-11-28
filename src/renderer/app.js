@@ -121,6 +121,9 @@ const state = {
   sidebarWidth: readSidebarWidth(),
   uiTheme: readUiTheme(),
   membership: null,
+  membershipAdmin: null,
+  membershipTab: 'activate',
+  membershipIssuer: { plan: 'lifetime', machineCode: '', memberName: '', months: 1, years: 1, note: '', issued: null },
   builtinTemplates: [],
   membershipModalOpen: false,
   builtinTemplatePreview: null,
@@ -129,6 +132,17 @@ const state = {
 };
 
 applyUiTheme(state.uiTheme);
+
+const assetBatchUI = window.createAssetBatchUI({
+  project: () => state.project,
+  episode: () => directorEpisodeSlots.baseNumber(state.project?.currentEpisode),
+  promptLibrary: () => state.assetPromptLibrary,
+  api: window.directorApi,
+  canEdit: () => membershipCanEdit(),
+  toast: message => showToast(message),
+  render: () => { if (state.view === 'assets' || modalRoot.querySelector('.asset-batch-modal')) render(); },
+  onPublished: () => refreshAssetPromptLibrary({ silent: true })
+});
 
 const directorUI=window.createDirectorUI({project:()=>state.project,view:()=>state.view,api:window.directorApi,toast:message=>showToast(message),canEdit:()=>membershipCanEdit(),isDirty:kind=>Boolean(state.documentDirty[kind]),label:key=>directorEpisodeSlots.label(state.project,key),onApplied:async file=>{
   if(!file||state.documentDirty.shotlist)return;
@@ -150,13 +164,14 @@ const reviewUI = window.createReviewUI({ project: () => state.project, view: () 
     if (state.project !== project) return false;
     if (Number(project.currentEpisode) !== target) {
       await activateEpisode(target);
-      markDirty();
+      scheduleEpisodePositionSave();
     }
     return state.project === project;
   } });
 const automationUI = window.createAutomationUI({project:()=>state.project,api:window.directorApi,
   onSettings:()=>markDirty(),
-  openLibrary:()=>{state.view='assets';render();document.querySelector('#flow-library')?.scrollIntoView({block:'start'});},
+  openLibrary:(kind)=>{state.view=kind==='relationships'?'html-relationships':kind==='assets'?'html-assets':'assets';render();},
+  openAssetBatch:()=>{state.view='assets';assetBatchUI.invalidate();render();setTimeout(()=>document.querySelector('.asset-batch-workbench')?.scrollIntoView({block:'start',behavior:'smooth'}),60);},
   render:()=>render(),toast:message=>showToast(message),canEdit:()=>membershipCanEdit(),
   save:async()=>{for(const kind of dirtyDocumentKinds())await saveFolderDocument(kind,{preserveViewport:false});await saveProject({renderAfter:false});},
   refresh:async bindings=>{
@@ -214,6 +229,7 @@ const views = [
   ['director-home', '制作总览'],
   ['shot-studio', '镜头工作台'],
   ['generate', '生成'],
+  ['automation', '自动制作'],
   ['project', '项目文件'],
   ['editor', '编辑与检查'],
   ['quality-center', '检查与优化'],
@@ -335,9 +351,15 @@ function ensureClientProjectShape(project) {
   project.activeFiles = { source: '', outline: '', script: '', shotlist: '', storyboard: '', ...(project.activeFiles || {}) };
   project.documentFormats = normalizeDocumentFormats(project.documentFormats);
   for (const episode of project.episodes || []) {
-    episode.outline = { content: '', versions: [], updatedAt: null, ...(episode.outline || {}) };
-    if (episode.script) episode.script = { content: '', versions: [], checks: [], confirmedChecks: [], updatedAt: null, ...episode.script };
-    if (episode.storyboard) episode.storyboard = { content: '', versions: [], checks: [], confirmedChecks: [], updatedAt: null, ...episode.storyboard };
+    // Episode records hold metadata only; text is read from disk and checks are recomputed.
+    episode.outline = { versions: [], updatedAt: null, ...(episode.outline || {}) };
+    if (episode.script) episode.script = { versions: [], confirmedChecks: [], updatedAt: null, ...episode.script };
+    if (episode.storyboard) episode.storyboard = { versions: [], confirmedChecks: [], updatedAt: null, ...episode.storyboard };
+    for (const kind of ['outline', 'script', 'shotlist', 'storyboard']) {
+      if (!episode[kind]) continue;
+      delete episode[kind].content;
+      delete episode[kind].checks;
+    }
   }
   for (const asset of project.assets || []) {
     if (!['role', 'scene', 'prop', 'voice'].includes(asset.category)) asset.category = asset.type === 'audio' ? 'voice' : 'role';
@@ -711,7 +733,12 @@ function syncActiveEpisode(kinds = ['outline', 'script', 'shotlist', 'storyboard
   if (!episode) return;
   const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : deepCopy(value);
   episode.targetSeconds = Number(state.project.targetDuration) || 120;
-  for (const kind of kinds) episode[kind] = clone(state.project[kind] || { content: '', versions: [], updatedAt: null });
+  // Keep confirmedChecks, versions and paths per episode, but never stale
+  // copies of document text or auto-generated check results.
+  for (const kind of kinds) {
+    const { content: _content, checks: _checks, ...metadata } = state.project[kind] || { versions: [], updatedAt: null };
+    episode[kind] = clone(metadata);
+  }
   episode.activeFiles = { ...(state.project.activeFiles || {}) };
 }
 
@@ -732,7 +759,13 @@ function updateEpisodeLoadingStatus(number) {
   if (status) status.textContent = number ? '正在读取第 ' + directorEpisodeSlots.label(state.project, number) + ' 集…' : '';
 }
 
-async function activateEpisode(number, { preferKnownFiles = false } = {}) {
+function isSharedOutlinePath(filePath) {
+  if (!filePath) return false;
+  const name = String(filePath).split(/[\\/]/).at(-1) || '';
+  return episodeNumberFromFileName(name) === null;
+}
+
+async function activateEpisode(number, { preferKnownFiles = false, preferredSourcePath = '' } = {}) {
   const project = state.project;
   if (!project) return false;
   const episode = project.episodes.find(item => Number(item.number) === Number(number));
@@ -751,7 +784,8 @@ async function activateEpisode(number, { preferKnownFiles = false } = {}) {
   const previousSourceNumber = episodeNumberFromFileName(previousSourcePath.split(/[\\/]/).at(-1));
   const sourceBinding = episode.sourceBinding || (Number(project.currentEpisode) === Number(episode.number)
     && (previousSourceNumber === null || previousSourceNumber === directorEpisodeSlots.baseNumber(episode.number)) ? previousSourcePath : '');
-  const sourceFile = (sourceBinding && fileMatchesDocumentFormat(sourceBinding, sourceFormat) ? { path: sourceBinding } : null)
+  const sourceFile = (preferredSourcePath ? { path: preferredSourcePath } : null)
+    || (sourceBinding && fileMatchesDocumentFormat(sourceBinding, sourceFormat) ? { path: sourceBinding } : null)
     || (project.source.files || []).find(file => fileMatchesDocumentFormat(file.path || file.name, sourceFormat)
     && (Number(file.episodeNumber) === directorEpisodeSlots.baseNumber(episode.number)
       || episodeNumberFromFileName(file.name) === directorEpisodeSlots.baseNumber(episode.number)));
@@ -778,7 +812,8 @@ async function activateEpisode(number, { preferKnownFiles = false } = {}) {
     state.checkInFlight = { script: false, storyboard: false, shotlist: false };
     project.currentEpisode = Number(episode.number);
     project.targetDuration = Number(episode.targetSeconds) || 120;
-    const sharedOutlinePath = project.activeFiles?.outline || episode.activeFiles?.outline || '';
+    const candidateOutlinePath = project.activeFiles?.outline || episode.activeFiles?.outline || '';
+    const sharedOutlinePath = isSharedOutlinePath(candidateOutlinePath) ? candidateOutlinePath : '';
     project.outline = { content: '', versions: episode.outline?.versions || [], updatedAt: null };
     project.script = { content: '', versions: episode.script?.versions || [], checks: episode.script?.checks || [], confirmedChecks: episode.script?.confirmedChecks || [], updatedAt: null };
     project.shotlist = { content: '', versions: episode.shotlist?.versions || [], updatedAt: null };
@@ -828,27 +863,76 @@ async function confirmSaveBeforeEpisodeChange(nextEpisode) {
   return true;
 }
 
-function rebuildEpisodes() {
-  if (!state.project) return;
+async function rebuildEpisodes({ manual = true } = {}) {
+  if (!state.project) return false;
   syncActiveEpisode();
   const season = state.project.season || {};
   const start = Number(season.startEpisode) || 1;
   const count = Math.max(1, Number(season.numberedEpisodes) || Number(season.totalEpisodes) || 1);
-  state.project.episodes = directorEpisodeSlots.numberedEpisodePlan(state.project, start, count);
+  const nextEpisodes = directorEpisodeSlots.numberedEpisodePlan(state.project, start, count);
+  const dropsCurrent = !nextEpisodes.some((episode) => Number(episode.number) === Number(state.project.currentEpisode));
+  if (dropsCurrent && !await confirmSaveBeforeEpisodeChange(start)) return false;
+  state.project.episodes = nextEpisodes;
   state.project.season = { ...season, startEpisode: start, endEpisode: start + count - 1,
-    numberedEpisodes: count, totalEpisodes: state.project.episodes.length };
-  if (!state.project.episodes.some((episode) => Number(episode.number) === Number(state.project.currentEpisode))) void activateEpisode(start);
+    numberedEpisodes: count, totalEpisodes: state.project.episodes.length, manualRange: Boolean(manual) };
+  if (dropsCurrent) await activateEpisode(start);
+  return true;
+}
+
+async function fitSeasonRangeToFiles() {
+  if (!state.project) return null;
+  const positive = files => [...new Set((files || [])
+    .map(file => Number(file?.episodeNumber) || episodeNumberFromFileName(file?.name || file?.path || ''))
+    .filter(number => Number.isFinite(number) && number > 0))];
+  const workFiles = ['outline', 'script', 'storyboard', 'seedance'].flatMap(kind => state.project.availableFiles?.[kind] || []);
+  const detected = positive(workFiles);
+  const numbers = detected.length ? detected : positive(state.project.source?.files);
+  if (!numbers.length) return null;
+  const start = Math.min(...numbers);
+  const end = Math.max(...numbers);
+  const count = end - start + 1;
+  const prevSeason = state.project.season;
+  state.project.season = { ...(state.project.season || {}), startEpisode: start, endEpisode: end, numberedEpisodes: count, manualRange: true };
+  if (!await rebuildEpisodes({ manual: true })) {
+    state.project.season = prevSeason;
+    return { cancelled: true };
+  }
+  return { start, end, count, fromWorkFiles: detected.length > 0 };
 }
 
 async function selectWorkspaceEpisode(nextEpisode) {
+  if (state.project && Number(nextEpisode) === Number(state.project.currentEpisode)) return true;
   if (!await confirmSaveBeforeEpisodeChange(nextEpisode)) return false;
   if (!await activateEpisode(nextEpisode)) return false;
   if (state.view === 'review') reviewUI.selectEpisode(nextEpisode);
-  markDirty();
+  // Browsing episodes is not an edit: remember the position in the background
+  // instead of flagging the project as having unsaved changes.
+  scheduleEpisodePositionSave();
   render();
-  if (state.view === 'assets') await refreshAssetPromptLibrary({ silent: true });
   return true;
 }
+
+let episodePositionTimer = null;
+let episodePositionProject = null;
+function scheduleEpisodePositionSave() {
+  if (!state.project || !membershipCanEdit()) return;
+  episodePositionProject = state.project;
+  clearTimeout(episodePositionTimer);
+  episodePositionTimer = setTimeout(() => { void flushEpisodePositionSave(); }, 800);
+}
+async function flushEpisodePositionSave() {
+  clearTimeout(episodePositionTimer);
+  episodePositionTimer = null;
+  const scheduled = episodePositionProject;
+  episodePositionProject = null;
+  if (!scheduled || state.project !== scheduled || !membershipCanEdit() || state.dirty) return;
+  try { await saveProject({ renderAfter: false, preserveViewport: false, deferRemote: true }); }
+  catch (error) {
+    console.warn('集数位置保存失败：', error?.message || error);
+    markDirty();
+  }
+}
+window.directorFlushEpisodePosition = flushEpisodePositionSave;
 
 let episodeSideButtonBusy = false;
 let lastEpisodeSideButton = null;
@@ -860,9 +944,11 @@ async function stepEpisodeWithMouse(direction, source = 'mouse') {
   if (lastEpisodeSideButton?.direction === direction && lastEpisodeSideButton.source !== source
       && now - lastEpisodeSideButton.time < 300) return;
   lastEpisodeSideButton = { direction, source, time: now };
-  if (episodeSideButtonBusy || !state.project || state.projectSwitchPending
-      || interfaceIsLocked() || compositionActive || editorComposition.busy()
+  if (!state.project || state.projectSwitchPending
+      || compositionActive || editorComposition.busy()
       || modalRoot.querySelector('.modal') || document.querySelector('dialog[open]')) return;
+  if (episodeSideButtonBusy) return showToast('正在切换集数，请稍候。');
+  if (interfaceIsLocked()) return showToast('当前任务进行中，请稍候再切集。');
   const numbers = (state.project.episodes || []).map(item => Number(item.number)).filter(Number.isFinite).sort((a, b) => a - b);
   const current = numbers.indexOf(Number(state.project.currentEpisode));
   if (current < 0) return;
@@ -878,7 +964,11 @@ for (const type of ['mousedown', 'mouseup', 'auxclick']) {
     if (event.button !== 3 && event.button !== 4) return;
     event.preventDefault();
     event.stopPropagation();
-    if (type === 'mousedown') void stepEpisodeWithMouse(event.button === 3 ? -1 : 1).catch(reportRendererFailure);
+    const direction = event.button === 3 ? -1 : 1;
+    if (type === 'mousedown') void stepEpisodeWithMouse(direction).catch(reportRendererFailure);
+    else if (type === 'mouseup' && lastEpisodeSideButton?.source === 'mouse' && lastEpisodeSideButton.direction === direction) {
+      lastEpisodeSideButton = { direction, source: 'mouse', time: performance.now() };
+    }
   }, { capture: true });
 }
 window.directorApi.onEpisodeStep?.(direction => {
@@ -887,6 +977,7 @@ window.directorApi.onEpisodeStep?.(direction => {
 
 function showToast(message) {
   toast.textContent = message;
+  toast.dataset.tone = window.DirectorUIMotion?.classifyToast?.(message) || 'info';
   toast.classList.add('show');
   clearTimeout(state.toastTimer);
   state.toastTimer = setTimeout(() => toast.classList.remove('show'), 3600);
@@ -930,7 +1021,9 @@ function updateSaveIndicators() {
     : sync && ['queued', 'saving'].includes(sync.status) ? '已保存 · 资料同步中' : '已保存';
   document.querySelectorAll('[data-action="save-document"]').forEach(button => {
     const saving = [...state.savingDocuments.values()].some(item => item.project === state.project && item.kind === button.dataset.kind && Number(item.episode) === Number(state.project?.currentEpisode));
-    button.textContent = saving ? '保存中…' : '保存';
+    if (saving || button.dataset.uiDone !== 'true') {
+      button.textContent = saving ? '保存中…' : '保存';
+    }
     button.setAttribute('aria-busy', String(saving));
     button.title = '保存当前文档（Ctrl+S）';
   });
@@ -967,10 +1060,17 @@ function captureVisibleViewport() {
   };
 }
 
+function rememberViewport(key, snapshot) {
+  if (!key) return;
+  state.viewports.delete(key);
+  state.viewports.set(key, snapshot);
+  while (state.viewports.size > 24) state.viewports.delete(state.viewports.keys().next().value);
+}
+
 function preserveViewportForNextRender() {
   if (state.pendingViewport?.key === state.renderedContextKey) return;
   state.pendingViewport = { key: state.renderedContextKey, ...captureVisibleViewport() };
-  state.viewports.set(state.renderedContextKey, state.pendingViewport);
+  rememberViewport(state.renderedContextKey, state.pendingViewport);
 }
 
 function restorePendingViewport() {
@@ -1036,19 +1136,39 @@ const membershipCanUseBuiltinTemplates = () => state.membership?.canUseBuiltinTe
 const membershipSafeActions = new Set([
   'html-select', 'html-refresh', 'html-reload', 'html-fullscreen', 'html-choose', 'html-files-toggle',
   'open-membership', 'close-membership', 'membership-activate', 'membership-import',
-  'membership-copy-machine', 'membership-remove-license', 'set-ui-theme', 'toggle-frog',
+  'membership-copy-machine', 'membership-paste-activate', 'membership-remove-license',
+  'membership-tab', 'membership-admin-self-activate', 'membership-admin-issue',
+  'membership-admin-copy-token', 'membership-admin-save-file', 'membership-admin-open-issuer',
+  'membership-issuer-plan', 'membership-issuer-use-self', 'membership-issuer-paste-machine',
+  'set-ui-theme', 'toggle-frog', 'ui-toggle-password',
   'mascot-next-message', 'toggle-script-mode', 'toggle-shotlist-mode', 'toggle-storyboard-mode',
-  'open-document-find', 'navigate-document-find', 'close-document-find', 'load-source-file',
+  'open-document-find', 'navigate-document-find', 'locate-document-find', 'close-document-find', 'load-source-file',
   'select-episode', 'set-asset-filter', 'refresh-assets', 'refresh-asset-prompts',
-  'locate-check', 'locate-script-check', 'close-modal', 'open-projects',
-  'close-projects', 'adopt-folder', 'select-recent-project'
-  , 'forget-project', 'forget-all-projects'
-  , 'review-select', 'review-play', 'review-back', 'review-forward', 'review-frame',
+  'locate-check', 'locate-script-check', 'close-modal', 'close-action-dialog', 'close-builtin-template',
+  'close-workflow-review', 'close-workflow-batch', 'close-task-review', 'close-batch',
+  'open-projects', 'close-projects', 'adopt-folder', 'select-recent-project',
+  'forget-project', 'forget-all-projects',
+  'ux-workspace-settings', 'ux-motion-level', 'ux-workspace-save', 'ux-check-settings',
+  'ux-check-defaults', 'ux-check-none', 'ux-replace-history', 'ux-backup-open', 'ux-backup-copy',
+  'workspace-open', 'workspace-focus', 'workspace-focus-mode', 'workspace-move-screen',
+  'workspace-copy-draft', 'workspace-reload',
+  'director-refresh', 'director-select', 'director-more-assets', 'director-edit-asset',
+  'director-cancel-asset', 'director-stop',
+  'flow-open-outputs', 'flow-open-reports', 'flow-library-refresh', 'flow-library-fullscreen',
+  'flow-library-relationships', 'flow-library-assets', 'flow-open-asset-batch',
+  'review-select', 'review-play', 'review-back', 'review-forward', 'review-frame',
   'review-frame-back', 'review-mute', 'review-fullscreen', 'review-pip', 'review-prev',
-  'review-next', 'review-external', 'review-open-folder', 'review-jump', 'review-export'
-  , 'review-open-video'
-  , 'unlock-work', 'ai-batch-stop', 'ai-batch-show', 'ai-batch-minimize', 'ai-batch-close', 'ai-batch-copy-draft',
-  'stop-batch', 'stop-workflow-batch', 'assistant-open'
+  'review-next', 'review-external', 'review-open-folder', 'review-jump', 'review-export',
+  'review-open-video',
+  'unlock-work', 'ai-batch-stop', 'ai-batch-show', 'ai-batch-minimize', 'ai-batch-close', 'ai-batch-copy-draft',
+  'stop-batch', 'stop-workflow-batch',
+  'assistant-open', 'assistant-close', 'assistant-tab', 'assistant-character',
+  'assistant-pet-greet', 'assistant-pet-pat', 'assistant-clear', 'assistant-do', 'assistant-stop-chat',
+  'asset-batch-select', 'asset-batch-refresh', 'asset-batch-filter-cat', 'asset-batch-filter-state',
+  'asset-batch-select-samples', 'asset-batch-select-l0', 'asset-batch-select-visible', 'asset-batch-select-clear',
+  'asset-batch-inspect', 'asset-batch-inspect-nav', 'asset-batch-inspect-zoom', 'asset-batch-inspect-bg',
+  'asset-batch-close-modal', 'asset-batch-modal-backdrop', 'asset-batch-open-settings', 'asset-batch-discover-codex',
+  'asset-batch-codex-cancel', 'asset-batch-ai-cancel', 'asset-batch-detect-magpie'
 ]);
 
 function membershipStatusText() {
@@ -1067,6 +1187,9 @@ function formatMembershipDate(value) {
 
 function renderMembershipModal() {
   const member = state.membership || {};
+  const adminAvailable = Boolean(state.membershipAdmin?.available);
+  const activeTab = adminAvailable && state.membershipTab === 'issuer' ? 'issuer' : 'activate';
+  const issuer = state.membershipIssuer || (state.membershipIssuer = { plan: 'lifetime', machineCode: '', memberName: '', months: 1, years: 1, note: '', issued: null });
   const templatesAvailable = member.builtinTemplatesAvailable;
   const plans = [
     ['free', '免费会员', '免费', '首次使用7天', '可阅读与编辑'],
@@ -1074,18 +1197,118 @@ function renderMembershipModal() {
     ['pro', 'Pro会员', '¥50/年', '按年开通', templatesAvailable ? '开放全部内置提示词' : '有效期内可编辑'],
     ['lifetime', '永久会员', '¥99', '一次开通', templatesAvailable ? '永久开放编辑与内置提示词' : '永久开放编辑']
   ];
-  modalRoot.innerHTML = `<div class="modal-overlay membership-overlay"><div class="modal membership-modal">
-        <div class="modal-head"><div><div class="eyebrow">MEMBERSHIP · V0.1.8</div><h2>导演台剧场会员中心</h2></div><button class="modal-close" data-action="close-membership">×</button></div>
-    <section class="membership-current ${member.active ? 'active' : 'expired'}"><div><span>当前身份</span><strong>${escapeHTML(member.planLabel || '读取中')}</strong><small>${escapeHTML(member.reason || (member.permanent ? '永久有效' : `有效期至 ${formatMembershipDate(member.expiresAt)}`))}</small></div><span class="membership-state">${member.canEdit ? '可编辑' : '只读'}</span></section>
+  const issuePlans = [
+    ['plus', 'Plus会员', '¥7/月', '按月有效'],
+    ['pro', 'Pro会员', '¥50/年', '按年有效'],
+    ['lifetime', '永久会员', '¥99', '永久有效'],
+    ['developer', '开发者', '内部', '永久内部授权'],
+    ['admin', '管理员', '内部', '永久管理员授权']
+  ];
+  const tabBar = adminAvailable ? `<div class="membership-tabs" role="tablist" aria-label="会员中心模式">
+    <button type="button" class="membership-tab ${activeTab === 'activate' ? 'active' : ''}" data-action="membership-tab" data-tab="activate" role="tab" aria-selected="${activeTab === 'activate'}">会员激活</button>
+    <button type="button" class="membership-tab ${activeTab === 'issuer' ? 'active' : ''}" data-action="membership-tab" data-tab="issuer" role="tab" aria-selected="${activeTab === 'issuer'}">发证小程序（本机管理员）</button>
+  </div>` : '';
+  const ownerQuickBar = adminAvailable && !member.permanent ? `<section class="membership-admin-banner">
+    <div><strong>检测到本机管理员签发密钥</strong><small>无需复制识别码或手动导入，点一下立即为当前电脑开通永久会员。</small></div>
+    <button class="button small" data-action="membership-admin-self-activate">一键激活本机永久会员</button>
+  </section>` : '';
+  const activateView = `
+    ${ownerQuickBar}
     ${member.bundledEdition ? '<p class="membership-note">此安装版本已附带永久会员，编辑和全部内置提示词均已解锁，无需激活或续费。AI 生成仍使用你自己配置的服务商和 API。</p>' : `<div class="membership-plans">${plans.map(([id, label, price, duration, note]) => `<article class="membership-plan ${member.plan === id ? 'current' : ''}"><span>${label}</span><strong>${price}</strong><small>${duration}<br>${note}</small></article>`).join('')}</div>`}
     ${!templatesAvailable ? '<p class="membership-note">当前版本使用自行导入的要求文件，可在规则页面选择。</p>' : member.plan === 'free' && member.active ? '<p class="membership-note">免费试用期间可以编辑项目和使用自行导入的要求文件。</p>' : ''}
     ${!member.canEdit ? '<p class="membership-note danger">会员已到期，项目仍可打开和阅读，但保存、修改、生成和内置提示词均已停止。</p>' : ''}
-    ${member.bundledEdition ? '' : `<div class="membership-activation"><div class="field"><label>电脑识别码</label><div class="membership-machine"><code>${escapeHTML(member.machineCode || '')}</code><button class="button quiet small" data-action="membership-copy-machine">复制</button></div></div>
-      <div class="field"><label>激活码</label><textarea id="membership-token" rows="4" placeholder="粘贴管理员发给你的激活码，或导入 .dtlicense 授权文件"></textarea></div>
-      <div class="form-actions"><button class="button secondary" data-action="membership-import">导入授权文件</button><button class="button" data-action="membership-activate">激活会员</button>${member.source === 'license' ? '<button class="button quiet" data-action="membership-remove-license">移除当前授权</button>' : ''}</div>
-      <p class="hint">购买或续费时，把电脑识别码发给管理员。开发者与管理员使用永久内部授权。</p>
-    </div>`}
+    ${member.bundledEdition ? '' : `<div class="membership-activation">
+      <div class="field">
+        <label>第 1 步 · 复制本机识别码发给管理员</label>
+        <div class="membership-machine"><code>${escapeHTML(member.machineCode || '')}</code><button class="button secondary small" data-action="membership-copy-machine">复制识别码</button></div>
+      </div>
+      <div class="field">
+        <label>第 2 步 · 一键激活（支持直接复制微信聊天消息，或把 .dtlicense 拖进来）</label>
+        <div class="membership-quick-actions">
+          <button class="button" data-action="membership-paste-activate">从剪贴板一键粘贴并激活</button>
+          <button class="button secondary" data-action="membership-import">选择 .dtlicense 文件</button>
+          ${member.source === 'license' ? '<button class="button quiet small" data-action="membership-remove-license">移除当前授权</button>' : ''}
+        </div>
+        <div class="membership-dropzone" id="membership-dropzone" tabindex="0">
+          <strong>把 .dtlicense 授权文件拖到这里松手即激活</strong>
+          <span>自动识别授权码，无需手动改名或复制长串字符</span>
+        </div>
+      </div>
+      <details class="membership-manual-box">
+        <summary>手动粘贴激活码</summary>
+        <textarea id="membership-token" rows="3" placeholder="粘贴管理员发给你的激活码（支持附带微信聊天前后文字，系统会自动提取）"></textarea>
+        <div class="form-actions" style="margin-top:8px"><button class="button small" data-action="membership-activate">确认激活</button></div>
+      </details>
+    </div>`}`;
+  const issued = issuer.issued;
+  const issuerView = `<div class="membership-issuer-miniapp">
+    <section class="membership-admin-banner">
+      <div><strong>本机快速开通</strong><small>当前电脑识别码：<code>${escapeHTML(member.machineCode || '')}</code></small></div>
+      <button class="button small" data-action="membership-admin-self-activate">${member.permanent ? '重新签发本机管理员授权' : '一键激活本机永久会员'}</button>
+    </section>
+    <div class="membership-issuer-form">
+      <div class="field">
+        <label>1. 选择会员套餐</label>
+        <div class="membership-issuer-plans">${issuePlans.map(([id, label, price, note]) => `<button type="button" class="membership-plan-choice ${issuer.plan === id ? 'active' : ''}" data-action="membership-issuer-plan" data-plan="${id}"><strong>${label}</strong><span>${price} · ${note}</span></button>`).join('')}</div>
+      </div>
+      <div class="field">
+        <label>2. 对方电脑识别码</label>
+        <div class="membership-issuer-machine">
+          <input id="membership-issuer-machine" type="text" value="${inputValue(issuer.machineCode)}" placeholder="粘贴 DT-XXXXXX-XXXXXX-XXXXXX-XXXXXX" />
+          <button type="button" class="button quiet small" data-action="membership-issuer-paste-machine">从剪贴板填入</button>
+          <button type="button" class="button quiet small" data-action="membership-issuer-use-self">填本机</button>
+        </div>
+      </div>
+      <div class="grid two">
+        <div class="field"><label>会员称呼 / 备注（可选）</label><input id="membership-issuer-name" type="text" value="${inputValue(issuer.memberName)}" placeholder="如：微信好友名 / 团队成员" /></div>
+        ${issuer.plan === 'plus' ? `<div class="field"><label>开通月数</label><input id="membership-issuer-months" type="number" min="1" max="120" value="${inputValue(issuer.months || 1)}" /></div>`
+          : issuer.plan === 'pro' ? `<div class="field"><label>开通年数</label><input id="membership-issuer-years" type="number" min="1" max="20" value="${inputValue(issuer.years || 1)}" /></div>`
+          : `<div class="field"><label>有效期</label><input type="text" value="永久有效" readonly /></div>`}
+      </div>
+      <div class="form-actions" style="margin-top:10px">
+        <button class="button" data-action="membership-admin-issue">立即生成激活码</button>
+      </div>
+    </div>
+    ${issued ? `<section class="membership-issued-card">
+      <div class="membership-issued-head">
+        <div><strong>已签发：${escapeHTML(issued.planLabel)} · ${escapeHTML(issued.payload?.memberName || '')}</strong><small>绑定机器：<code>${escapeHTML(issued.payload?.machineCode || '')}</code> · ${issued.payload?.expiresAt ? `有效期至 ${formatMembershipDate(issued.payload.expiresAt)}` : '永久有效'}</small></div>
+        <span class="badge pass">已自检通过</span>
+      </div>
+      <textarea class="membership-issued-token" rows="2" readonly>${escapeHTML(issued.token || '')}</textarea>
+      <div class="form-actions">
+        <button class="button small" data-action="membership-admin-copy-token">一键复制激活码（发微信）</button>
+        <button class="button secondary small" data-action="membership-admin-save-file">保存为 .dtlicense 文件</button>
+      </div>
+    </section>` : ''}
+  </div>`;
+  modalRoot.innerHTML = `<div class="modal-overlay membership-overlay"><div class="modal membership-modal">
+        <div class="modal-head"><div><div class="eyebrow">MEMBERSHIP · V${escapeHTML(state.membership?.version || window.directorRuntimeInfo?.patch || '0.1.14')}</div><h2>导演台剧场会员中心</h2></div><button class="modal-close" data-action="close-membership">×</button></div>
+    <section class="membership-current ${member.active ? 'active' : 'expired'}"><div><span>当前身份</span><strong>${escapeHTML(member.planLabel || '读取中')}</strong><small>${escapeHTML(member.reason || (member.permanent ? '永久有效' : `有效期至 ${formatMembershipDate(member.expiresAt)}`))}</small></div><span class="membership-state">${member.canEdit ? '可编辑' : '只读'}</span></section>
+    ${tabBar}
+    ${activeTab === 'issuer' ? issuerView : activateView}
   </div></div>`;
+  const dropzone = modalRoot.querySelector('#membership-dropzone');
+  if (dropzone) {
+    dropzone.addEventListener('dragover', ev => { ev.preventDefault(); dropzone.classList.add('is-dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('is-dragover'));
+    dropzone.addEventListener('drop', async ev => {
+      ev.preventDefault();
+      dropzone.classList.remove('is-dragover');
+      const file = ev.dataTransfer?.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        state.membership = await window.directorApi.membershipActivate(text);
+        await refreshMembership();
+        state.membershipModalOpen = true;
+        render();
+        showToast(`已通过「${file.name}」激活会员！`);
+      } catch (error) {
+        showToast(error?.message || '拖入的文件不是有效授权。');
+      }
+    });
+  }
+  window.DirectorUIMotion?.syncGlideTracks?.(modalRoot);
 }
 
 function renderBuiltinTemplateModal() {
@@ -1119,12 +1342,24 @@ function applyMembershipAccess() {
   });
 }
 
+window.directorApi.onWorkspaceChanged(event => {
+  if (event.type === 'asset-archive' && state.view === 'assets' && projectPathKey(event.projectPath) === projectPathKey(state.project?.projectPath)) {
+    void refreshAssetPromptLibrary({ silent: true });
+    assetBatchUI.invalidate();
+  }
+  if (event.type === 'asset-batch' && projectPathKey(event.projectPath) === projectPathKey(state.project?.projectPath))
+    assetBatchUI.invalidate();
+});
 const workspaceUI = window.createWorkspaceUI({ state, api: window.directorApi, render,
   toast: showToast, reviewUI: () => reviewUI, applyDocument: applyOpenedDocument,
   appendFile: appendFolderFile, syncEpisode: syncActiveEpisode, refreshHighlights: refreshHighlightedEditors, isComposing: () => compositionActive });
 
 async function refreshMembership({ loadTemplates = true } = {}) {
   state.membership = await window.directorApi.membershipStatus();
+  if (window.directorApi.membershipAdminStatus) {
+    try { state.membershipAdmin = await window.directorApi.membershipAdminStatus(); }
+    catch { state.membershipAdmin = { available: false }; }
+  }
   state.builtinTemplates = [];
   if (loadTemplates && membershipCanUseBuiltinTemplates()) {
     state.builtinTemplates = await window.directorApi.builtinTemplates();
@@ -1133,12 +1368,12 @@ async function refreshMembership({ loadTemplates = true } = {}) {
 }
 
 function renderShell(content, { liveEditor = null } = {}) {
-  if (state.view === 'rules') content = renderWorkspacePreferencesEntry() + content;
+  if (state.project && state.view === 'rules') content = renderWorkspacePreferencesEntry() + content;
   const navGroups = { 'director-home': '创作', assets: '素材与资料', review: '审片与设置' };
   const renderNavItem = ([id, label]) => {
     const kind = viewDocumentKinds[id];
-    const active = id === 'editor' ? ['outline', 'script', 'shotlist', 'storyboard'].includes(state.view) : state.view === id;
-    return `${navGroups[id] ? `<div class="nav-group-label">${navGroups[id]}</div>` : ''}<div class="nav-row ${active ? 'active' : ''} ${id.startsWith('html-')?'html-child':''}"><button class="nav-view-button ${active ? 'active' : ''}" data-view="${id}" ${active ? 'aria-current="page"' : ''}>${label}</button>${kind && state.project ? documentFormatSelect(kind, true) : ''}${state.project ? `<button type="button" class="workspace-nav-open" data-action="workspace-open" data-workspace-view="${id}" aria-label="在独立窗口打开${label}" title="在独立窗口打开${label}">↗</button>` : ''}</div>`;
+    const active = state.project && (id === 'editor' ? ['outline', 'script', 'shotlist', 'storyboard'].includes(state.view) : state.view === id);
+    return `${navGroups[id] ? `<div class="nav-group-label">${navGroups[id]}</div>` : ''}<div class="nav-row ${active ? 'active' : ''} ${id.startsWith('html-')?'html-child':''}"><button class="nav-view-button ${active ? 'active' : ''}" data-view="${id}" ${active ? 'aria-current="page"' : ''} ${state.project ? '' : 'disabled'}>${label}</button>${kind && state.project ? documentFormatSelect(kind, true) : ''}${state.project ? `<button type="button" class="workspace-nav-open" data-action="workspace-open" data-workspace-view="${id}" aria-label="在独立窗口打开${label}" title="在独立窗口打开${label}">↗</button>` : ''}</div>`;
   };
   const preferences = readWorkspacePreferences();
   const nav = views.filter(([id]) => preferences.pinOptionalTools || !optionalWorkspaceViews.has(id)).map(renderNavItem).join('')
@@ -1178,7 +1413,7 @@ function renderShell(content, { liveEditor = null } = {}) {
   const shellMarkup = `
     <div class="shell ${editorWorkspaceKind() ? 'editor-shell' : ''} ${state.view.startsWith('html-') ? 'html-shell' : ['project','source','editor','outline','script','shotlist','storyboard'].includes(state.view) ? '' : 'compact-shell'} ${interfaceIsLocked() ? 'locked' : ''}" style="--sidebar-width: ${state.sidebarWidth}px">
       <aside class="sidebar">
-          <div class="brand"><div class="brand-mark"><img src="../assets/brand-v008/logo-display.png" alt="" /></div><div><div class="brand-name">导演台剧场</div><div class="brand-subtitle">DIRECTOR THEATER · V0.1.12</div></div></div>
+          <div class="brand"><div class="brand-mark"><img src="../assets/brand-v008/logo-display.png" alt="" /></div><div><div class="brand-name">导演台剧场</div><div class="brand-subtitle">DIRECTOR THEATER · V${escapeHTML(state.membership?.version || window.directorRuntimeInfo?.patch || '0.1.14')}</div></div></div>
         <nav class="nav" aria-label="导演台功能">${nav}</nav>
         <div class="sidebar-bottom">
           ${sidebarChecks ? `<div class="sidebar-check-slot">${renderLocalCheckContext(state.view)}${sidebarChecks}</div>` : ''}
@@ -1233,8 +1468,10 @@ function renderEmpty() {
   applyMembershipAccess();
   if (state.membershipModalOpen) renderMembershipModal();
   else if (state.builtinTemplatePreview) renderBuiltinTemplateModal();
+  else if (state.actionDialog) renderActionDialog();
   else if (state.projectWizard) renderProjectWizard();
   else if (state.projectChooserOpen) renderProjectChooser();
+  else closeModal();
 }
 
 function renderHome() {
@@ -1264,7 +1501,7 @@ function renderHome() {
       <article class="card"><div class="card-kicker">当前单集</div><div class="metric">${project.targetDuration}<small> s</small></div><div class="metric-note">第 ${directorEpisodeSlots.label(project, project.currentEpisode)} 集 · ${escapeHTML(episode.status || '待创作')}</div></article>
       <article class="card"><div class="card-kicker">当前集风险</div><div class="metric">${risks}</div><div class="metric-note">${risks ? '先修正后再交付' : '尚未检查或已通过'}</div></article>
     </div>
-    <article class="card" style="margin-top:16px"><div class="card-title"><h2>整季总控</h2><span class="badge">可修改</span></div><div class="form-grid"><div class="field"><label>开始集号</label><input data-bind="season.startEpisode" type="number" min="1" value="${season.startEpisode || 1}" /></div><div class="field"><label>编号集数</label><input data-bind="season.numberedEpisodes" type="number" min="1" value="${season.numberedEpisodes || season.totalEpisodes || 1}" /><p class="hint">含上／下分段后，实际可编辑位置：${project.episodes.length} 个。</p></div><div class="field"><label>本季总分钟数</label><input data-bind="season.totalMinutes" type="number" min="1" value="${season.totalMinutes || 1}" /></div></div><div class="form-actions"><button class="button secondary small" data-action="rebuild-episodes">更新本季集数</button><button class="button secondary small" data-action="split-episode">将当前集拆为上／下</button></div><div class="episode-strip">${project.episodes.map((item) => `<button class="episode-chip ${Number(item.number) === Number(project.currentEpisode) ? 'current' : ''}" data-action="select-episode" data-episode="${item.number}"><span>EP ${directorEpisodeSlots.label(project, item.number)}</span><small>${item.targetSeconds || 120}s</small></button>`).join('')}</div></article>
+    <article class="card" style="margin-top:16px"><div class="card-title"><h2>整季总控</h2><span class="badge">可修改</span></div><div class="form-grid"><div class="field"><label>开始集号</label><input data-bind="season.startEpisode" type="number" min="1" value="${season.startEpisode || 1}" /></div><div class="field"><label>编号集数</label><input data-bind="season.numberedEpisodes" type="number" min="1" value="${season.numberedEpisodes || season.totalEpisodes || 1}" /><p class="hint">含上／下分段后，实际可编辑位置：${project.episodes.length} 个。</p></div><div class="field"><label>本季总分钟数</label><input data-bind="season.totalMinutes" type="number" min="1" value="${season.totalMinutes || 1}" /></div></div><div class="form-actions"><button class="button secondary small" data-action="rebuild-episodes">更新本季集数</button><button class="button secondary small" data-action="fit-season-to-files" title="按当前项目已有的大纲、剧本、分镜或提示词集号收紧集数轨道">按已有文件收紧集数</button><button class="button secondary small" data-action="split-episode">将当前集拆为上／下</button></div><div class="episode-strip">${project.episodes.map((item) => `<button class="episode-chip ${Number(item.number) === Number(project.currentEpisode) ? 'current' : ''}" data-action="select-episode" data-episode="${item.number}"><span>EP ${directorEpisodeSlots.label(project, item.number)}</span><small>${item.targetSeconds || 120}s</small></button>`).join('')}</div></article>
     <div class="workflow">${stages.map(([number, title, description, view, ready, meta], index) => `<button class="workflow-stage ${ready ? 'ready' : ''}" data-view="${view}"><span class="workflow-number">${number}</span><span class="workflow-copy"><strong>${title}</strong><small>${description}</small></span><span class="workflow-status">${meta}</span>${index < stages.length - 1 ? '<span class="workflow-arrow">→</span>' : ''}</button>`).join('')}</div>
     <div class="quick-actions"><button class="button" data-view="script">进入第 ${directorEpisodeSlots.label(project, project.currentEpisode)} 集剧本</button><button class="button secondary" data-action="toggle-ai-drawer">打开 AI 任务栏</button><button class="button secondary" data-action="run-check">检查当前 Seedance 提示词</button></div>
   </section>`;
@@ -1379,12 +1616,12 @@ function renderScriptChecks(placement = 'inline') {
 }
 
 function editorWorkspaceKind() {
-  return ['outline', 'script', 'shotlist', 'storyboard'].includes(state.view) ? state.view : '';
+  return state.project && ['outline', 'script', 'shotlist', 'storyboard'].includes(state.view) ? state.view : '';
 }
 
 function renderEditorWorkspaceHeader() {
   const kind = editorWorkspaceKind();
-  if (!kind) return '';
+  if (!kind || !state.project) return '';
   const project = state.project;
   let context = '';
   let controls = '';
@@ -1540,7 +1777,8 @@ function renderStoryboard() {
 }
 
 function assetPreview(asset) {
-  if (asset.type === 'image') return `<img src="${encodeURI(`file:///${asset.localPath.replace(/\\/g, '/')}`).replace(/#/g, '%23')}" alt="${escapeHTML(asset.name)}" />`;
+  if (asset.readable === false) return '<span>文件不可读</span>';
+  if (asset.type === 'image') return `<img src="${inputValue(asset.fileUrl)}" alt="${inputValue(asset.name)}" />`;
   return '<span>音频参考</span>';
 }
 
@@ -1566,14 +1804,19 @@ function assetSearchText(entry) {
     .filter(Boolean).join('\n').toLocaleLowerCase();
 }
 
-function assetEntriesForCurrentEpisode(category, library = state.assetPromptLibrary) {
+function currentAssetLibrary() {
+  const library = state.assetPromptLibrary;
+  return library?.projectPath === state.project?.projectPath && library?.episodeNumber === directorEpisodeSlots.baseNumber(state.project?.currentEpisode) ? library : null;
+}
+
+function assetEntriesForCurrentEpisode(category, library = currentAssetLibrary()) {
   const promptEntries = library?.categories?.[category]?.entries || [];
   const episode = directorEpisodeSlots.baseNumber(state.project?.currentEpisode);
-  const localEntries = (state.project?.assets || []).filter((asset) => assetCategory(asset) === category && asset.episodes?.includes(episode));
+  const localEntries = (library?.images || []).filter((asset) => assetCategory(asset) === category && asset.episodes?.includes(episode));
   return { promptEntries, localEntries };
 }
 
-function assetNamesForCurrentEpisode(category, library = state.assetPromptLibrary) {
+function assetNamesForCurrentEpisode(category, library = currentAssetLibrary()) {
   const { promptEntries, localEntries } = assetEntriesForCurrentEpisode(category, library);
   return [...new Set([
     ...promptEntries.map((item) => item.name),
@@ -1619,29 +1862,30 @@ function isInDedicatedRoleFolder(asset) {
 
 function renderAssetCard(asset) {
   const category = assetCategory(asset);
-  const dragAttributes = asset.type === 'image'
+  const draggable = asset.type === 'image' && Boolean(asset.localPath) && asset.readable !== false;
+  const dragAttributes = draggable
     ? `draggable="true" data-asset-drag-path="${inputValue(asset.localPath)}" title="按住图片拖到 Seedance 或其他软件中使用"`
     : '';
-  return `<article class="asset-card">
-    <div class="asset-preview ${asset.type === 'image' ? 'asset-preview-draggable' : ''}" ${dragAttributes}><span class="asset-kind semantic-${category}">${assetCategoryMeta[category].label}</span>${assetPreview(asset)}${asset.type === 'image' ? '<span class="asset-drag-note">按住图片拖出使用</span>' : ''}</div>
+  return `<article class="asset-card" data-archive-id="${inputValue(asset.archive ? asset.id : '')}">
+    <div class="asset-preview ${draggable ? 'asset-preview-draggable' : ''}" ${dragAttributes}><span class="asset-kind semantic-${category}">${assetCategoryMeta[category].label}</span>${assetPreview(asset)}${draggable ? '<span class="asset-drag-note">按住图片拖出使用</span>' : ''}</div>
     <div class="asset-card-body">
       <div class="asset-card-head"><strong>${escapeHTML(asset.name || '未命名素材')}</strong><span>${asset.type === 'audio' ? '音频' : '图片'}</span></div>
-      <div class="asset-standard">@${escapeHTML(asset.standardName?.trim() || '未设置标准名称')}</div>
+      <div class="asset-standard">${asset.archive ? escapeHTML([asset.look, asset.view].filter(Boolean).join(' · ')) : '@' + escapeHTML(asset.standardName?.trim() || asset.name)}</div>
       <div class="asset-episodes">${escapeHTML(episodeSummary(asset))}</div>
-      <div class="asset-card-actions">${category === 'role' && !isInDedicatedRoleFolder(asset) ? `<button class="button quiet small" data-action="organize-role-asset" data-asset-id="${asset.id}">收纳到人物文件夹</button>` : ''}</div>
+       ${asset.archive ? `<div class="asset-episodes">本集分场 · ${escapeHTML(asset.source_scenes.filter(s => Number(s.split('-')[0]) === directorEpisodeSlots.baseNumber(state.project.currentEpisode)).join('、') || '未记录')}</div><div class="asset-episodes">实际模型 · ${escapeHTML(asset.actual_model || '未记录')}</div><div class="asset-episodes">${asset.readable ? '文件可读' : '文件不可读，请检查归档位置'}</div>` : `<div class="asset-card-actions">${category === 'role' && !isInDedicatedRoleFolder(asset) ? `<button class="button quiet small" data-action="organize-role-asset" data-asset-id="${inputValue(asset.id)}">收纳到人物文件夹</button>` : ''}</div>
       <details class="asset-edit"><summary>编辑</summary>
         <div class="asset-edit-fields">
-          <label>显示名称<input data-asset-id="${asset.id}" data-asset-field="name" value="${inputValue(asset.name)}" /></label>
-          <label>分镜标准名称<input data-asset-id="${asset.id}" data-asset-field="standardName" value="${inputValue(asset.standardName)}" placeholder="不含 @，例如：阮念念" /></label>
-          <label>素材设定 / 提示词<textarea data-asset-id="${asset.id}" data-asset-field="prompt" placeholder="外形、服装、镜头或音色特征…">${escapeHTML(asset.prompt)}</textarea></label>
+          <label>显示名称<input data-asset-id="${inputValue(asset.id)}" data-asset-field="name" value="${inputValue(asset.name)}" /></label>
+          <label>分镜标准名称<input data-asset-id="${inputValue(asset.id)}" data-asset-field="standardName" value="${inputValue(asset.standardName)}" placeholder="不含 @，例如：阮念念" /></label>
+          <label>素材设定 / 提示词<textarea data-asset-id="${inputValue(asset.id)}" data-asset-field="prompt" placeholder="外形、服装、镜头或音色特征…">${escapeHTML(asset.prompt)}</textarea></label>
         </div>
-      </details>
+      </details>`}
     </div>
   </article>`;
 }
 
 function renderAssets() {
-  const library = state.assetPromptLibrary;
+  const library = currentAssetLibrary();
   const category = assetPromptCategoryMeta[state.assetFilter] ? state.assetFilter : 'role';
   const categoryInfo = library?.categories?.[category] || { ...assetPromptCategoryMeta[category], fileName: '', entries: [] };
   const query = state.assetSearchQuery.trim().toLocaleLowerCase();
@@ -1656,74 +1900,33 @@ function renderAssets() {
     const visibleNames = query ? names.filter((name) => name.toLocaleLowerCase().includes(query)) : names;
     return `<button class="asset-episode-category ${category === key ? 'active' : ''}" data-action="set-asset-filter" data-asset-filter="${key}"><span class="asset-kind semantic-${key}">${meta.label}</span><strong>${visibleNames.length}</strong><small>${visibleNames.length ? escapeHTML(visibleNames.join(' · ')) : '本集未识别到'}</small></button>`;
   }).join('');
+  const images = assetEntriesForCurrentEpisode(category, library).localEntries;
+  const visibleImages = images.filter(image => !query || assetSearchText(image).includes(query));
+  function hasImage(entry) {
+    return images.some(image => image.readable !== false && (
+      (entry.id && (image.id === entry.id || image.id.startsWith(entry.id + '__'))) ||
+      image.name === entry.name && (!entry.variant || entry.variant === entry.name) ||
+      (entry.variant && (image.name === entry.name + '（' + entry.variant + '）' || image.name.startsWith(entry.name + '（' + entry.variant)))));
+  }
   const promptCards = entries.map((entry) => `<article class="asset-prompt-card">
-    <div class="asset-prompt-card-head"><div><span class="asset-kind semantic-${category}">${assetPromptCategoryMeta[category].label}</span><h2>${escapeHTML(entry.name)}</h2></div><p>${escapeHTML(entry.variant || '当前集版本')}</p></div>
+    <div class="asset-prompt-card-head"><div><span class="asset-kind semantic-${category}">${assetPromptCategoryMeta[category].label}</span><h2>${escapeHTML(entry.name)}</h2></div><p>${escapeHTML([entry.variant, hasImage(entry) ? '已有成品图' : '待匹配成品图'].filter(Boolean).join(' · '))}</p></div>
     <div class="asset-prompt-applies">${escapeHTML(entry.appliesTo || `适用：第${directorEpisodeSlots.label(state.project, state.project.currentEpisode)}集`)}</div>
     <div class="asset-prompt-text">${escapeHTML(entry.prompt)}</div>
   </article>`).join('');
   const empty = library
-    ? `<div class="empty asset-prompt-empty"><h2>${categoryInfo.fileName ? `第${directorEpisodeSlots.label(state.project, state.project.currentEpisode)}集没有匹配的${assetPromptCategoryMeta[category].label}资产提示词` : `未找到${assetPromptCategoryMeta[category].documentLabel}文件`}</h2><p>${categoryInfo.fileName ? `已读取 ${categoryInfo.fileName}，仅展示标有当前集适用范围的内容。` : '请把对应的 TXT 放在项目的 06 资产文件夹中。'}</p></div>`
+    ? `<div class="empty asset-prompt-empty"><h2>${categoryInfo.fileName ? `第${directorEpisodeSlots.label(state.project, state.project.currentEpisode)}集没有匹配的${assetPromptCategoryMeta[category].label}资产提示词` : `未找到${assetPromptCategoryMeta[category].documentLabel}文件`}</h2><p>${categoryInfo.fileName ? `已读取 ${escapeHTML(categoryInfo.fileName)}，仅展示标有当前集适用范围的内容。` : '请把对应的 TXT 放在项目的 06 资产文件夹中。'}</p></div>`
     : `<div class="empty asset-prompt-empty"><h2>正在读取本集资产提示词</h2><p>将从 06 资产中读取角色、场景、道具三份 TXT。</p></div>`;
-  return `<section class="page asset-page"><div class="asset-toolbar"><div class="asset-title"><strong>素材提示词</strong><span>第${directorEpisodeSlots.label(state.project, state.project.currentEpisode)}集 · 06 资产</span></div><div class="asset-toolbar-actions"><button class="button quiet small" data-action="refresh-asset-prompts">刷新</button></div></div>
+  return `<section class="page asset-page"><div class="asset-toolbar"><div class="asset-title"><strong>素材</strong><span>第${directorEpisodeSlots.label(state.project, state.project.currentEpisode)}集 · 06 资产</span></div><div class="asset-toolbar-actions"><button class="button secondary small" data-action="import-asset-manifest">导入归档清单</button><button class="button secondary small" data-action="bind-archive-root">绑定本机归档根目录</button><button class="button quiet small" data-action="refresh-asset-prompts">刷新</button></div></div>
     <div class="asset-episode-overview"><div class="asset-episode-overview-title"><strong>第 ${directorEpisodeSlots.label(state.project, state.project.currentEpisode)} 集素材</strong><span>人物、场景、道具仅统计当前集可用素材</span></div><div class="asset-episode-categories">${overview}</div></div>
     <div class="asset-filterbar"><div class="asset-filters">${tabs}</div><label class="asset-find"><input data-asset-find value="${inputValue(state.assetSearchQuery)}" autocomplete="off" placeholder="查找本集素材" /><span>${query ? `${entries.length}/${allEntries.length}` : `${allEntries.length}`}</span></label><div class="asset-prompt-source">${escapeHTML(categoryInfo.fileName || assetPromptCategoryMeta[category].documentLabel)}</div></div>
-    ${entries.length ? `<div class="asset-prompt-list">${promptCards}</div>` : empty}
+    ${(library?.warnings || []).map(message => '<p class="notice">' + escapeHTML(message) + '</p>').join('')}
+    ${assetBatchUI.render()}
+    <h2>本集成品图</h2>${visibleImages.length ? '<div class="asset-grid">' + visibleImages.map(renderAssetCard).join('') + '</div>' : '<p class="hint">' + (library ? '本集没有匹配的成品图。' : '正在读取归档清单…') + '</p>'}
+    <h2>本集资产提示词</h2>${entries.length ? `<div class="asset-prompt-list">${promptCards}</div>` : empty}
   ${htmlLibraryUI.renderCards()}</section>`;
 }
 
-function renderRules() {
-  const project = state.project;
-  const runner = project.chatGptRunner || { mode: 'chrome', tabId: '', port: 9222, replyMode: 'auto' };
-  const chrome = state.chromeStatus;
-  const availableTabs = chrome?.tabs || [];
-  const documents = project.ruleDocuments || [];
-  const scriptTemplate = currentPrompt('script');
-  const boardTemplate = currentPrompt('storyboard');
-  const groups = [
-    ['script', '剧本生成规则', '这类规则会随每次剧本任务一并发给 ChatGPT。'],
-    ['storyboard', 'Seedance 分镜规则', '这类规则会随每次分镜提示词任务一并发给 ChatGPT。'],
-    ['shared', '项目记忆与通用规则', '这类规则会同时注入剧本与分镜任务。']
-  ];
-  return `<section class="page">
-    <div class="rules-toolbar"><div class="rules-toolbar-title"><strong>规则与记忆</strong><span>07 AI规则与记忆 · 仅作用于之后发起的生成任务</span></div><div class="rules-toolbar-actions"><button class="button quiet small" data-action="open-global-find-replace">全局查找替换</button><button class="button small" data-action="save-rule-settings">保存规则与记忆</button></div></div>
-    <article class="card rules-priority-card"><div class="card-title"><h2>执行优先级</h2><span class="badge">全任务</span></div><div class="field"><textarea data-bind="executionPriority" placeholder="写入剧本与提示词任务都要遵守的执行优先级…">${escapeHTML(project.executionPriority || defaultExecutionPriority)}</textarea></div></article>
-    <div class="grid three" style="margin-top:16px">${groups.map(([category, title, note]) => { const docs = documents.filter((doc) => doc.category === category); return `<article class="card"><div class="card-title"><h2>${title}</h2><button class="button quiet small" data-action="import-rules" data-rule-category="${category}">导入文档</button></div><p class="hint">${note}</p><div class="rule"></div>${docs.length ? `<div class="version-list">${docs.map((doc) => `<label class="version"><input type="checkbox" data-rule-id="${doc.id}" ${doc.enabled !== false ? 'checked' : ''} style="margin-right:7px" /><span class="version-name" style="display:inline">${escapeHTML(doc.name)}</span><span class="version-time">${escapeHTML(doc.path)}</span></label>`).join('')}</div>` : `<p class="hint">尚未导入。可把已有 TXT、Markdown 或 Word 规则文件放入此类。</p>`}</article>`; }).join('')}</div>
-    <div class="grid three" style="margin-top:16px"><article class="card"><div class="card-title"><h2>项目记忆</h2><span class="badge">全任务</span></div><div class="field"><textarea data-bind="memory.project" placeholder="世界观、年代、叙事视角、每集节奏、不可修改的设定…">${escapeHTML(project.memory?.project || '')}</textarea></div></article><article class="card"><div class="card-title"><h2>角色与素材记忆</h2><span class="badge">连续性</span></div><div class="field"><textarea data-bind="memory.characters" placeholder="角色标准名、关系、外形、服装、音色、场景和关键道具的固定设定…">${escapeHTML(project.memory?.characters || '')}</textarea></div></article><article class="card"><div class="card-title"><h2>剧情连续性记忆</h2><span class="badge">跨集</span></div><div class="field"><textarea data-bind="memory.continuity" placeholder="上集结尾、本集起点、已发生事件、未回收伏笔、禁止矛盾的剧情事实…">${escapeHTML(project.memory?.continuity || '')}</textarea></div></article></div>
-    <article class="card" style="margin-top:16px"><div class="card-title"><h2>ChatGPT 运行方式</h2><span class="badge">当前聊天优先</span></div><div class="grid two"><div class="field"><label>运行方式</label><select data-bind="chatGptRunner.mode"><option value="chrome" ${runner.mode === 'chrome' ? 'selected' : ''}>使用我的 Chrome · 当前聊天</option><option value="embedded" ${runner.mode === 'embedded' ? 'selected' : ''}>软件内 ChatGPT（兼容模式）</option></select></div><div class="field"><label>单集最长等待官网回复</label><select data-bind="chatGptRunner.waitMinutes"><option value="30" ${Number(runner.waitMinutes) === 30 ? 'selected' : ''}>30 分钟</option><option value="50" ${Number(runner.waitMinutes) !== 30 ? 'selected' : ''}>50 分钟（默认）</option></select></div><div class="field"><label>默认回收结果</label><select data-bind="chatGptRunner.replyMode"><option value="auto" ${runner.replyMode === 'auto' ? 'selected' : ''}>自动识别（附件优先，正文兜底）</option><option value="attachment" ${runner.replyMode === 'attachment' ? 'selected' : ''}>只收 TXT 附件</option><option value="message" ${runner.replyMode === 'message' ? 'selected' : ''}>只收聊天正文</option></select></div>${runner.mode === 'embedded' ? `<div class="field"><label>剧本任务进入的项目</label><input data-bind="chatGptProjects.script" value="${inputValue(project.chatGptProjects?.script || '剧本工程')}" /></div><div class="field"><label>镜头计划与 Seedance 任务进入的项目</label><input data-bind="chatGptProjects.prompt" value="${inputValue(project.chatGptProjects?.prompt || '提示词工程')}" /></div>` : ''}</div>${runner.mode === 'chrome' ? `<div class="field" style="margin-top:12px"><label>要继续使用的 ChatGPT 当前聊天</label><select data-bind="chatGptRunner.tabId"><option value="">${availableTabs.length ? '自动选择第一个当前聊天' : '先点击“刷新当前聊天”'}</option>${availableTabs.map((tab) => `<option value="${escapeHTML(tab.id)}" ${String(runner.tabId) === String(tab.id) ? 'selected' : ''}>${escapeHTML(tab.title || tab.url)}</option>`).join('')}</select></div><div class="form-actions" style="margin-top:12px"><button class="button secondary" data-action="open-chrome-permission">① 打开 Chrome 授权</button><button class="button secondary" data-action="refresh-chrome-status">② 刷新当前聊天</button><button class="button quiet small" data-action="reset-chrome">连接卡住时重连</button><button class="button secondary" data-action="open-chatgpt">打开我的 ChatGPT</button></div><p class="hint" style="margin:12px 0 0">默认“自动识别”会优先保存 ChatGPT 返回的 TXT 附件；若本次仅在聊天框输出，将直接把聊天正文存成当前集 TXT，保存为当前选择的文件格式。单集审核和批量任务都可临时改为“只收附件”或“只收正文”。</p>${chrome ? `<div class="notice ${chrome.ok ? '' : 'danger-note'}" style="margin-top:10px">${chrome.ok ? `已连接到 Chrome，发现 ${chrome.tabs.length} 个 ChatGPT 当前聊天。` : escapeHTML(chrome.reason || 'Chrome 当前聊天尚未连接。')}</div>` : ''}` : `<p class="hint" style="margin:12px 0 0">兼容模式会为每项任务先回到填写的 ChatGPT 项目首页，再从项目内建立全新聊天；不会复用旧会话，也不会使用项目外的新聊天。默认“自动识别”仍会优先保存 TXT 附件，找不到时保存聊天正文。单集最长等待回复时间使用上方的 30 或 50 分钟设置。</p>`}</article>
-    <div class="grid two" style="margin-top:16px"><article class="card"><div class="card-title"><h2>剧本任务主提示词</h2><button class="button quiet small" data-action="save-prompt-version" data-kind="script">保存为新版本</button></div><div class="hint" style="margin-bottom:8px">${escapeHTML(scriptTemplate?.name || '内置剧本模板')}</div><div class="field"><textarea class="prompt-editor" data-prompt-kind="script">${escapeHTML(scriptTemplate?.content || '')}</textarea></div></article><article class="card"><div class="card-title"><h2>Seedance 任务主提示词</h2><button class="button quiet small" data-action="save-prompt-version" data-kind="storyboard">保存为新版本</button></div><div class="hint" style="margin-bottom:8px">${escapeHTML(boardTemplate?.name || '内置 Seedance 模板')}</div><div class="field"><textarea class="prompt-editor" data-prompt-kind="storyboard">${escapeHTML(boardTemplate?.content || '')}</textarea></div></article></div>
-    <div class="notice" style="margin-top:16px">“执行优先级”可在本页上方修改；修改后点击“保存规则与记忆”，它会写入项目规则文件，并自动用于之后的剧本与 Seedance 任务。主提示词仍使用各自的“保存为新版本”。</div>
-  </section>`;
-}
-
-function renderAiDrawer() {
-  const queue = state.project.queue || [];
-  const usingChrome = (state.project.chatGptRunner?.mode || 'chrome') === 'chrome';
-  const captureKind = state.view === 'storyboard' ? 'storyboard' : 'script';
-  const captureLabel = captureKind === 'storyboard' ? 'Seedance 提示词' : '剧本';
-  const taskActions = (task) => {
-    const locked = ['自动执行中', '已保存'].includes(task.status);
-    const canDownload = ['等待回复', '需人工发送', '读取失败'].includes(task.status);
-    return `<div class="task-actions"><button class="button quiet small" data-action="open-task-review" data-task-id="${task.id}" ${locked ? 'disabled' : ''}>${task.status === '自动执行中' ? '执行中' : task.status === '已保存' ? '已保存' : '审核'}</button>${canDownload ? `<button class="button quiet small" data-action="capture-task" data-task-id="${task.id}">读取官网回复</button>` : ''}<button class="button quiet small danger" data-action="remove-task" data-task-id="${task.id}">删除</button></div>`;
-  };
-  return `<aside class="ai-drawer ${state.aiDrawerOpen ? 'open' : ''}">
-    <div class="ai-drawer-head"><div><div class="eyebrow">CHATGPT WEB RUNNER</div><h2>AI 任务</h2></div><button class="modal-close" data-action="toggle-ai-drawer">×</button></div>
-    <div class="ai-drawer-project">第 ${directorEpisodeSlots.label(state.project, state.project.currentEpisode)} 集 · ${state.project.targetDuration} 秒<br><span>${usingChrome ? '运行：我的 Chrome · 当前聊天（不新建聊天）' : `剧本 → ${escapeHTML(state.project.chatGptProjects?.script || '剧本工程')}<br>镜头 / Seedance → ${escapeHTML(state.project.chatGptProjects?.prompt || '提示词工程')}<br>每项任务均在指定项目内新建聊天`}<br>${state.project.ruleDocuments.filter((doc) => doc.enabled !== false).length} 份规则 + ${(state.project.referenceDocuments || []).filter((doc) => doc.enabled !== false).length} 份参照文档将自动注入并上传</span></div>
-    <div class="drawer-actions"><button class="button" data-action="queue-script">单集剧本</button><button class="button secondary" data-action="queue-storyboard">单集提示词</button></div>
-    <div class="drawer-actions" style="margin-top:8px"><button class="button" data-action="open-batch-script">批量剧本</button><button class="button secondary" data-action="open-batch-storyboard">批量提示词</button></div>
-    <button class="button quiet small" style="width:100%;margin-top:8px" data-action="capture-current-attachment" data-kind="${captureKind}">读取当前集已生成的${captureLabel}回复</button>
-    <p class="hint" style="margin:7px 0 0">此按钮不会发送新消息；按“默认回收结果”读取当前聊天的 TXT 附件或聊天正文，并保存到本集文件夹。</p>
-    <p class="hint" style="margin:10px 0 0">批量任务会先让你逐集审阅完整发送内容；确认开始后，程序才会逐集处理并锁定主界面。${usingChrome ? ' 将复用你选定的当前 ChatGPT 聊天。' : ''}</p>
-    <button class="button secondary" style="width:100%;margin-top:8px" data-action="open-chatgpt">${usingChrome ? '打开我的 Chrome' : '打开 ChatGPT 官网'}</button>
-    <div class="rule"></div>
-    <div class="card-title"><h3>当前任务队列</h3><span class="badge">${queue.length}</span></div>
-    <div class="drawer-queue">${queue.length ? queue.slice().reverse().map((task) => `<article class="drawer-task"><div><strong>${escapeHTML(task.name)}</strong><small class="task-status ${statusClass(task.status)}">${escapeHTML(task.status)}</small></div><p>${escapeHTML(task.note || (task.kind === 'script' ? '将自动下载到 03 剧本。' : task.kind === 'storyboard' ? '将自动下载到 05 seedance提示词。' : '等待执行。'))}</p>${taskActions(task)}</article>`).join('') : `<p class="hint">从这里发起剧本或 Seedance 任务。每次执行前都会先显示完整发送内容供你审核。</p>`}</div>
-    <div class="drawer-foot">网页要求登录、验证或页面结构变动时，程序会暂停并保留任务；手动处理后可读取对应 TXT 附件或聊天正文。</div>
-  </aside>`;
-}
-
-// New file-first workflow.  This declaration intentionally supersedes the
-// legacy drawer/rules renderer above while keeping old queued tasks readable
-// for projects created before the workflow upgrade.
+// File-first workflow views.
 function renderGenerate() {
   const project = state.project;
   const mode = project.generationMode || 'api';
@@ -1873,13 +2076,15 @@ async function finalizeEpisode(kind) {
   const content = state.project[kind]?.content?.trim();
   if (!content) return showToast('当前内容为空，无法定稿替换。');
   const title = kind === 'script' ? '剧本' : kind === 'shotlist' ? '分镜计划' : 'Seedance 提示词';
-  const stem = `${directorEpisodeSlots.label(state.project, state.project.currentEpisode)}集`;
+  const stem = directorEpisodeSlots.fileStem(state.project, state.project.currentEpisode);
+  const format = documentFormatForKind(kind);
+  const ext = format === 'docx' ? '.docx' : format === 'md' ? '.md' : '.txt';
   state.actionDialog = {
     type: 'confirm',
     action: 'finalize-episode',
     kind,
     title: `定稿替换“${stem}”`,
-    message: `将当前${title}保存为“${stem}.txt”和“${stem}.docx”，并删除该集全部“（改N）”及旧自动归档文件。`,
+    message: `将当前${title}保存为“${stem}${ext}”，并删除该集全部“（改N）”及旧自动归档文件（不会覆盖其他格式的 Word/TXT 伴随文件）。`,
     confirmLabel: '确认定稿替换'
   };
   render();
@@ -1889,12 +2094,19 @@ async function executeFinalizeEpisode(kind) {
   const content = state.project[kind]?.content?.trim();
   if (!content) return showToast('当前内容为空，无法定稿替换。');
   const result = await window.directorApi.finalizeEpisodeOutput(state.project, kind);
+  if (result.outputPath) {
+    state.project.activeFiles[kind] = result.outputPath;
+    state.workspaceVersions[kind] = { projectPath: state.project.projectPath, episode: Number(state.project.currentEpisode), path: result.outputPath, version: result.workspaceVersion || null };
+    appendFolderFile(kind, { name: result.outputPath.split(/[\\/]/).at(-1), path: result.outputPath, updatedAt: new Date().toISOString() });
+  }
   state.project[kind].versions = [{ id: crypto.randomUUID(), name: result.stem, content, createdAt: new Date().toISOString() }];
   state.project[kind].updatedAt = new Date().toISOString();
+  clearDocumentDirty(kind);
   syncActiveEpisode();
   markDirty();
   await saveProject();
-  showToast(`已定稿：已更新 ${result.stem}.txt 与 ${result.stem}.docx。`);
+  const savedName = result.outputPath ? result.outputPath.split(/[\\/]/).at(-1) : `${result.stem}.${result.format || 'txt'}`;
+  showToast(`已定稿：已更新 ${savedName}。`);
 }
 
 function openPromptVersionDialog(kind) {
@@ -1945,7 +2157,6 @@ async function runScriptCheck({ silent = false, preserveViewport = false } = {})
   state.project.script.checks = filterConfirmedScriptChecks(checks);
   state.checkCache.script = currentScriptCheckFingerprint();
   syncActiveEpisode(['script']);
-  if (!silent) markDirty();
   updateCheckPanels();
   const errors = state.project.script.checks.filter((item) => item.level === 'error').length;
   if (!silent) showToast('本地检查完成：' + documentCheckHeadline('script') + '。');
@@ -1965,7 +2176,6 @@ async function runCheck({ silent = false, preserveViewport = false } = {}) {
   state.checkCache.storyboard = currentCheckFingerprint();
   if (activeEpisode() && state.project.storyboard.checks.length && state.project.storyboard.checks.every((item) => !['error', 'info'].includes(item.level))) activeEpisode().status = '质检通过';
   syncActiveEpisode(['storyboard']);
-  if (!silent) markDirty();
   updateCheckPanels();
   const errors = state.project.storyboard.checks.filter((item) => item.level === 'error').length;
   if (!silent) showToast(errors ? `检查完成：发现 ${errors} 个阻断问题。` : '检查完成：未发现阻断问题。');
@@ -2242,7 +2452,7 @@ async function openFolderDocument(kind, filePath) {
   if (state.documentFindActiveIndex?.[kind] !== undefined) state.documentFindActiveIndex[kind] = 0;
   applyOpenedDocument(kind, document);
   if (kind !== 'source') syncActiveEpisode();
-  markDirty();
+  scheduleEpisodePositionSave();
   render();
   if (localCheckPolicy().automatic && kind === 'script' && state.view === 'script') await runScriptCheck({ silent: true });
   if (localCheckPolicy().automatic && kind === 'storyboard' && state.view === 'storyboard') await runCheck({ silent: true });
@@ -2254,6 +2464,7 @@ async function switchDocumentFormat(kind, nextFormat) {
   const format = ['txt', 'md', 'docx'].includes(nextFormat) ? nextFormat : documentFormatDefaults[kind];
   const previousFormat = documentFormatForKind(kind);
   if (format === previousFormat) return;
+  await documentSaveQueue.drain();
   if (state.documentDirty?.[kind]) {
     const shouldSave = await window.directorConfirm(`当前${documentKindLabel(kind)}有未保存修改。\n\n先按 ${documentFormatLabel(previousFormat)} 保存，再切换到 ${documentFormatLabel(format)}；取消则保持当前格式。`);
     if (!shouldSave) {
@@ -2261,18 +2472,38 @@ async function switchDocumentFormat(kind, nextFormat) {
       return;
     }
     await saveFolderDocument(kind, { preserveViewport: true });
+    if (state.documentDirty?.[kind]) {
+      render();
+      return showToast('保存期间还有新输入，格式保持不变；请先保存后再切换。');
+    }
   }
 
-  const previousPath = state.project.activeFiles?.[kind] || '';
+  const switchingProject = state.project;
+  const switchingEpisode = Number(switchingProject.currentEpisode);
+  const switchingRevision = state.documentEditRevision || 0;
+  const previousPath = switchingProject.activeFiles?.[kind] || '';
   const previousStem = previousPath.split(/[\\/]/).at(-1)?.replace(/\.(?:txt|md|markdown|docx)$/i, '') || '';
-  state.project.documentFormats = normalizeDocumentFormats({ ...state.project.documentFormats, [kind]: format });
-  if (kind === 'shotlist') state.shotlistMode = format === 'md' ? 'preview' : 'edit';
   const files = folderFilesForKind(kind, format);
   const preferred = files.find((file) => file.name?.replace(/\.(?:txt|md|markdown|docx)$/i, '') === previousStem) || files[0] || null;
 
+  let openedDocument = null;
   if (preferred) {
-    const document = await window.directorApi.openDocumentFile(state.project, kind, preferred.path);
-    applyOpenedDocument(kind, document);
+    try {
+      openedDocument = await window.directorApi.openDocumentFile(switchingProject, kind, preferred.path);
+    } catch (error) {
+      render();
+      throw error;
+    }
+    if (state.project !== switchingProject || Number(state.project.currentEpisode) !== switchingEpisode || (state.documentEditRevision || 0) !== switchingRevision) {
+      render();
+      return showToast('读取期间页面或编辑内容发生变化，格式保持不变。');
+    }
+  }
+
+  state.project.documentFormats = normalizeDocumentFormats({ ...state.project.documentFormats, [kind]: format });
+  if (kind === 'shotlist') state.shotlistMode = format === 'md' ? 'preview' : 'edit';
+  if (openedDocument) {
+    applyOpenedDocument(kind, openedDocument);
     if (kind !== 'source') syncActiveEpisode();
   } else {
     state.project.activeFiles[kind] = kind === 'source' ? previousPath : '';
@@ -2281,9 +2512,9 @@ async function switchDocumentFormat(kind, nextFormat) {
   markDirty();
   await saveProject({ renderAfter: false });
   render();
-  if (preferred && kind === 'script') await runScriptCheck({ silent: true });
-  if (preferred && kind === 'storyboard') await runCheck({ silent: true });
-  showToast(preferred
+  if (openedDocument && kind === 'script') await runScriptCheck({ silent: true });
+  if (openedDocument && kind === 'storyboard') await runCheck({ silent: true });
+  showToast(openedDocument
     ? `已切换为 ${documentFormatLabel(format)}，并读取 ${preferred.name}`
     : `已切换为 ${documentFormatLabel(format)}；当前目录没有该格式，点击“保存”即可创建。`);
 }
@@ -2302,11 +2533,13 @@ async function saveFolderDocument(kind, { preserveViewport = true } = {}) {
     state.savingDocuments.set(key, { project, episode, kind });
     delete state.saveErrors[kind];
     updateSaveIndicators();
+    let savedClean = false;
     try {
   if (preserveViewport) preserveViewportForNextRender();
   const activePath = state.project.activeFiles?.[kind] || '';
   const activeEpisode = episodeNumberFromFileName(activePath.split(/[\\/]/).at(-1));
-  const safeActivePath = kind === 'outline' || (!activeEpisode && (kind === 'source' || directorEpisodeSlots.partForKey(state.project, state.project.currentEpisode) !== '下'))
+  const safeActivePath = (kind === 'outline' && isSharedOutlinePath(activePath))
+    || (!activeEpisode && (kind === 'source' || kind === 'outline' || directorEpisodeSlots.partForKey(state.project, state.project.currentEpisode) !== '下'))
     || (activeEpisode === directorEpisodeSlots.baseNumber(state.project.currentEpisode)
     && directorEpisodeSlots.matchingPart(state.project, state.project.currentEpisode, activePath, kind === 'source')) ? activePath : '';
   const knownVersion = state.workspaceVersions[kind];
@@ -2338,7 +2571,7 @@ async function saveFolderDocument(kind, { preserveViewport = true } = {}) {
   }
   if (preserveViewport && state.pendingViewport) {
     state.pendingViewport.key = viewportContextKey();
-    state.viewports.set(state.pendingViewport.key, state.pendingViewport);
+    rememberViewport(state.pendingViewport.key, state.pendingViewport);
   }
   appendFolderFile(kind, document);
   if (kind !== 'source') syncActiveEpisode();
@@ -2352,6 +2585,7 @@ async function saveFolderDocument(kind, { preserveViewport = true } = {}) {
   // Checks update the visible document after the durable save has completed.
   // Other document checks remain stale until their page is opened.
   scheduleEpisodeChecks(project, episode, state.episodeLoadToken);
+  savedClean = !state.documentDirty[kind];
   showToast(state.documentDirty[kind] ? '已保存此前内容；你刚输入的新修改已保留，请继续保存。' : `已保存：${document.name}`);
   return true;
     } catch (error) {
@@ -2364,6 +2598,9 @@ async function saveFolderDocument(kind, { preserveViewport = true } = {}) {
     } finally {
       state.savingDocuments.delete(key);
       updateSaveIndicators();
+      if (savedClean && state.project === project && Number(project.currentEpisode) === episode) {
+        window.DirectorUIMotion?.pulseDone?.(window.document.querySelector(`[data-action="save-document"][data-kind="${kind}"]`), { preserveLabel: true, duration: 1500 });
+      }
     }
   });
 }
@@ -2382,7 +2619,7 @@ function openEpisodeFindReplace(kind) {
     type: 'find-replace',
     scope: 'episode',
     kind,
-    title: '第 ' + state.project.currentEpisode + ' 集查找替换',
+    title: '第 ' + directorEpisodeSlots.label(state.project, state.project.currentEpisode) + ' 集查找替换',
     confirmLabel: '替换本集'
   };
   render();
@@ -2408,7 +2645,9 @@ async function openGlobalFindReplace() {
     dialog.saveFailed = true;
     dialog.error = '当前编辑保存失败：' + (error.message || error);
   } finally {
-    dialog.busy = ''; if (state.actionDialog === dialog) renderActionDialog();
+    dialog.busy = '';
+    dialog.progressText = '';
+    if (state.actionDialog === dialog) renderActionDialog();
   }
 }
 
@@ -2573,6 +2812,29 @@ function renderDocumentFindResults() {
     : '<p class="hint document-find-empty">当前文件中没有找到这段文字。</p>';
 }
 
+function replaceTextareaRange(editor, nextValue) {
+  const prev = editor.value;
+  if (prev === nextValue) return;
+  let prefix = 0;
+  const minLen = Math.min(prev.length, nextValue.length);
+  while (prefix < minLen && prev.charCodeAt(prefix) === nextValue.charCodeAt(prefix)) prefix += 1;
+  let prevEnd = prev.length;
+  let nextEnd = nextValue.length;
+  while (prevEnd > prefix && nextEnd > prefix && prev.charCodeAt(prevEnd - 1) === nextValue.charCodeAt(nextEnd - 1)) {
+    prevEnd -= 1;
+    nextEnd -= 1;
+  }
+  const inserted = nextValue.slice(prefix, nextEnd);
+  editor.focus({ preventScroll: true });
+  editor.setSelectionRange(prefix, prevEnd);
+  let applied = false;
+  try { applied = Boolean(document.execCommand?.('insertText', false, inserted)); } catch {}
+  if (!applied || editor.value !== nextValue) {
+    editor.value = nextValue;
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
 function locateDocumentFind(kind, start, end, line) {
   const content = contentForKind(kind);
   const safeStart = Math.max(0, Math.min(Number(start) || 0, content.length));
@@ -2580,9 +2842,12 @@ function locateDocumentFind(kind, start, end, line) {
   state.actionDialog = null;
   state.documentFindLocation = { kind, line: Number(line) || 1 };
   closeModal();
-  if (kind === 'script') {
-    state.view = 'script';
-    state.scriptMode = 'edit';
+  if (['outline', 'script', 'shotlist', 'storyboard'].includes(kind)) {
+    state.view = kind;
+    state.editorView = kind;
+    if (kind === 'script') state.scriptMode = 'edit';
+    if (kind === 'shotlist') state.shotlistMode = 'edit';
+    if (kind === 'storyboard') state.storyboardMode = 'edit';
   } else {
     state.view = 'storyboard';
   }
@@ -2595,8 +2860,14 @@ function locateDocumentFind(kind, start, end, line) {
 async function replaceCurrentEpisodeText(kind, needle, replacement) {
   const current = String(contentForKind(kind) || '');
   const count = replacementCount(current, needle);
-  if (!count) return showToast('当前第 ' + state.project.currentEpisode + ' 集没有找到要替换的内容。');
-  state.project[kind].content = current.split(needle).join(replacement);
+  const epLabel = directorEpisodeSlots.label(state.project, state.project.currentEpisode);
+  if (!count) return showToast('当前第 ' + epLabel + ' 集没有找到要替换的内容。');
+  const nextValue = current.split(needle).join(replacement);
+  const textarea = document.querySelector(`textarea[data-bind="${kind}.content"]`);
+  if (textarea) replaceTextareaRange(textarea, nextValue);
+  state.project[kind].content = nextValue;
+  markDocumentDirty(`${kind}.content`);
+  markDirty();
   await saveFolderDocument(kind);
   showToast('已在本集' + documentKindLabel(kind) + '中替换 ' + count + ' 处，并写回文件夹。');
 }
@@ -2633,11 +2904,20 @@ async function refreshAssets({ silent = false } = {}) {
   if (!silent) showToast(`素材库已刷新：识别到 ${assets.length} 份素材。`);
 }
 
+let assetReadToken = null;
+let displayedAssetScope = '';
 async function refreshAssetPromptLibrary({ silent = false } = {}) {
   if (!state.project) return;
-  const episodeNumber = Number(state.project.currentEpisode);
-  const library = await window.directorApi.loadAssetPromptLibrary(state.project, episodeNumber);
-  if (Number(state.project.currentEpisode) !== episodeNumber) return;
+  const projectPath = state.project.projectPath;
+  const episodeNumber = directorEpisodeSlots.baseNumber(state.project.currentEpisode);
+  const token = {};
+  assetReadToken = token;
+  let library;
+  try { library = await window.directorApi.loadAssetPromptLibrary(state.project, episodeNumber); }
+  catch (error) { library = { projectPath, episodeNumber, categories: {}, images: [], warnings: ['读取素材失败：' + error.message] }; }
+  if (assetReadToken !== token) return;
+  assetReadToken = null;
+  if (state.project?.projectPath !== projectPath || directorEpisodeSlots.baseNumber(state.project?.currentEpisode) !== episodeNumber) return;
   state.assetPromptLibrary = library;
   render();
   if (!silent) {
@@ -2840,6 +3120,7 @@ async function forgetRecentProjects(ids) {
     state.projects = result.projects;
     if (includesCurrent) {
       state.project = null;
+      state.view = 'director-home';
       state.dirty = false;
       state.documentDirty = { source: false, outline: false, script: false, shotlist: false, storyboard: false };
       state.episodeLoadToken = {};
@@ -2866,12 +3147,14 @@ function renderProjectWizard() {
     : draft.step === 1
       ? `<p class="hint">已有文件可直接带入项目；软件会复制到对应目录，原文件保留。三项都可以跳过，稍后再导入。</p><div class="wizard-file-list">${fileRow('source', '小说原文', 'TXT、Markdown 或 Word')}${fileRow('outline', '分集大纲', '可选，之后可在编辑页补充')}${fileRow('script', '现有剧本', '可选，之后可生成或编辑')}</div>`
       : `<p class="hint">按当前作品填写；不确定时保持默认值，建好后仍可调整。</p><div class="form-grid"><div class="field wide"><label for="new-project-genre">作品类型</label><input id="new-project-genre" value="${inputValue(draft.genre)}" /></div><div class="field"><label for="new-project-episode">起始集</label><input id="new-project-episode" type="number" min="1" value="${draft.startEpisode}" /></div><div class="field"><label for="new-project-count">计划集数</label><input id="new-project-count" type="number" min="1" value="${draft.totalEpisodes}" /></div><div class="field"><label for="new-project-duration">每集预计秒数</label><input id="new-project-duration" type="number" min="1" value="${draft.targetDuration}" /></div></div><div class="notice">将创建“${escapeHTML(draft.title || '未命名项目')}”；带入 ${Object.keys(draft.seedFiles).length} 份资料。之后可以继续导入或修改。</div>`;
-  modalRoot.innerHTML = `<div class="modal-overlay"><div class="modal project-wizard-modal"><div class="modal-head"><div><div class="eyebrow">新建项目 · 第 ${draft.step + 1} / 3 步</div><h2>${steps[draft.step]}</h2></div><button class="modal-close" data-action="close-modal" aria-label="关闭">×</button></div><div class="wizard-steps">${steps.map((label, index) => `<span class="${index === draft.step ? 'current' : index < draft.step ? 'done' : ''}">${index + 1} ${label}</span>`).join('')}</div><div class="wizard-body">${body}</div><div class="form-actions wizard-actions"><button class="button quiet" data-action="close-modal">取消</button>${draft.step > 0 ? `<button class="button secondary" data-action="wizard-back">上一步</button>` : ''}${draft.step > 0 && draft.step < 2 ? `<button class="button secondary" data-action="wizard-skip">跳过此步</button>` : ''}<button class="button" data-action="${draft.step === 2 ? 'create-project' : 'wizard-next'}">${draft.step === 2 ? '创建项目' : '下一步'}</button></div></div></div>`;
+  const wizardProgress = draft.step === 0 ? 16 : draft.step === 1 ? 56 : 100;
+  modalRoot.innerHTML = `<div class="modal-overlay"><div class="modal project-wizard-modal"><div class="modal-head"><div><div class="eyebrow">新建项目 · 第 ${draft.step + 1} / 3 步</div><h2>${steps[draft.step]}</h2></div><button class="modal-close" data-action="close-modal" aria-label="关闭">×</button></div><div class="wizard-steps" style="--step-progress:${wizardProgress}">${steps.map((label, index) => `<span class="${index === draft.step ? 'current' : index < draft.step ? 'done' : ''}">${index + 1} ${label}</span>`).join('')}</div><div class="wizard-body">${body}</div><div class="form-actions wizard-actions"><button class="button quiet" data-action="close-modal">取消</button>${draft.step > 0 ? `<button class="button secondary" data-action="wizard-back">上一步</button>` : ''}${draft.step > 0 && draft.step < 2 ? `<button class="button secondary" data-action="wizard-skip">跳过此步</button>` : ''}<button class="button" data-action="${draft.step === 2 ? 'create-project' : 'wizard-next'}">${draft.step === 2 ? '创建项目' : '下一步'}</button></div></div></div>`;
   if (draft.step === 0) document.querySelector('#new-project-title')?.focus();
 }
 
 async function saveCurrentProjectBeforeSwitch({ actionLabel = '切换项目', confirmed = false } = {}) {
   if (!state.project) return true;
+  await flushEpisodePositionSave();
   await documentSaveQueue.drain();
   await projectSaveQueue.drain();
   const dirtyKinds = dirtyDocumentKinds();
@@ -2974,7 +3257,7 @@ function closeActionDialog() {
 function renderActionDialog() {
   const dialog = state.actionDialog;
   if (!dialog) return closeModal();
-  if (renderUsabilityDialog(dialog)) { arrangeUsabilityDialog(); return; }
+  if (renderUsabilityDialog(dialog)) { arrangeUsabilityDialog(); window.DirectorUIMotion?.syncGlideTracks?.(modalRoot, { animate: false }); return; }
   if (dialog.type === 'find-replace' && dialog.scope === 'global') { renderGlobalReplaceDialog(dialog); arrangeUsabilityDialog(); return; }
   if (dialog.type === 'document-find') {
     const label = documentKindLabel(dialog.kind);
@@ -2994,7 +3277,7 @@ function renderActionDialog() {
     const globalPreview = dialog.scope === 'global' && dialog.preview;
     const scopeNote = dialog.scope === 'global'
       ? '查找项目文件夹的 00–05 与 07 目录，支持 UTF-8 的 TXT、Markdown 和 Word。先查找预览，确认后才替换；发现读取错误时禁止写入。替换前自动备份，Word 排版会按原程序重建。'
-      : '仅处理当前第 ' + state.project.currentEpisode + ' 集正在打开的' + documentKindLabel(dialog.kind) + '文件，并立刻写回文件夹。';
+      : '仅处理当前第 ' + directorEpisodeSlots.label(state.project, state.project.currentEpisode) + ' 集正在打开的' + documentKindLabel(dialog.kind) + '文件，并立刻写回文件夹。';
     body = globalPreview
       ? `<p class="hint">${scopeNote}</p><div class="global-replace-summary"><strong>找到 ${dialog.preview.files} 个文件，共 ${dialog.preview.replacements} 处</strong><span>“${escapeHTML(dialog.needle)}” → “${escapeHTML(dialog.replacement)}”</span></div><div class="global-replace-results">${(dialog.preview.matches || []).slice(0, 200).map((item) => `<div><strong>${escapeHTML(item.path)}</strong><span>${item.count} 处</span></div>`).join('')}</div>${dialog.preview.matches?.length > 200 ? '<p class="hint">结果仅展示前200个文件，统计及替换包含所有命中文件。</p>' : ''}${(dialog.preview.errors || []).length ? '<p class="hint">部分文件未能读取，当前结果不完整，不能替换：</p><div class="global-replace-results">' + dialog.preview.errors.slice(0, 50).map(item => '<p>' + escapeHTML(item.path + '：' + item.message) + '</p>').join('') + '</div>' : ''}`
       : '<p class="hint">' + scopeNote + `</p><div class="field" style="margin-top:14px"><label>查找内容</label><textarea id="find-replace-find" ${dialog.busy ? 'disabled' : ''} rows="3" placeholder="输入要查找的文字；按原样匹配">${escapeHTML(dialog.needle || '')}</textarea></div><div class="field" style="margin-top:12px"><label>替换为</label><textarea id="find-replace-replace" ${dialog.busy ? 'disabled' : ''} rows="3" placeholder="可留空，表示删除找到的内容">${escapeHTML(dialog.replacement || '')}</textarea></div>`;
@@ -3544,11 +3827,11 @@ document.addEventListener('compositionstart', (event) => {
     updateHighlightedEditor(event.target, { committed: true });
     compositionViews.set(event.target, { baseValue: event.target.value, start: event.target.selectionStart, end: event.target.selectionEnd, data: '', useNative: false });
   }
-  clearTimeout(highlightTimers.get(event.target));
+  if (highlightTimers.has(event.target)) { cancelAnimationFrame(highlightTimers.get(event.target)); highlightTimers.delete(event.target); }
   editorComposition.start(event.target);
 });
 document.addEventListener('compositionupdate', (event) => {
-  clearTimeout(highlightTimers.get(event.target));
+  if (highlightTimers.has(event.target)) { cancelAnimationFrame(highlightTimers.get(event.target)); highlightTimers.delete(event.target); }
   if (event.target.matches?.('textarea[data-highlight-layer]')) {
     const previous = compositionViews.get(event.target) || { start: event.target.selectionStart, end: event.target.selectionEnd };
     compositionViews.set(event.target, { ...previous, data: String(event.data || ''), useNative: false });
@@ -3561,17 +3844,23 @@ document.addEventListener('compositionend', (event) => {
     compositionViews.set(event.target, { ...view, data: String(event.data || ''), useNative: true });
     updateCompositionPreview(event.target);
   }
+  if (event.target.matches?.('[data-inline-document-find]')) {
+    runInlineDocumentFind(event.target.dataset.inlineDocumentFind, event.target.value);
+  }
+  if (event.target.matches?.('[data-asset-find]')) {
+    runAssetSearch(event.target.value);
+  }
   editorComposition.end(event.target);
 });
 function render() {
   if(compositionActive){renderAfterComposition=true;return;}
   reviewUI.beforeRender();
   if (state.renderedContextKey && appRoot.querySelector('.shell') && state.pendingViewport?.key !== state.renderedContextKey) {
-    state.viewports.set(state.renderedContextKey, captureVisibleViewport());
+    rememberViewport(state.renderedContextKey, captureVisibleViewport());
   }
   if (!state.project) return renderEmpty();
   ensureClientProjectShape(state.project);
-  const pages = { 'director-home':directorUI.renderPage,'shot-studio':directorUI.renderPage,'html-relationships':htmlLibraryUI.renderPage,'html-assets':htmlLibraryUI.renderPage,'html-post':htmlLibraryUI.renderPage,'html-other':htmlLibraryUI.renderPage,'quality-center':automationUI.renderQuality,review: reviewUI.renderReview, 'review-notes': reviewUI.renderNotes, generate: renderGenerate, workbench: workbenchRender, production: productionRender, home: renderHome, project: renderProject, outline: renderOutline, script: renderScript, shotlist: renderShotlist, storyboard: renderStoryboard, assets: renderAssets, ai: renderGenerate, rules: renderRules, quality: renderQuality, export: renderExport };
+  const pages = { 'director-home':directorUI.renderPage,'shot-studio':directorUI.renderPage,'automation':automationUI.renderAutomation,'html-relationships':htmlLibraryUI.renderPage,'html-assets':htmlLibraryUI.renderPage,'html-post':htmlLibraryUI.renderPage,'html-other':htmlLibraryUI.renderPage,'quality-center':automationUI.renderQuality,review: reviewUI.renderReview, 'review-notes': reviewUI.renderNotes, generate: renderGenerate, workbench: workbenchRender, production: productionRender, home: renderHome, project: renderProject, outline: renderOutline, script: renderScript, shotlist: renderShotlist, storyboard: renderStoryboard, assets: renderAssets, ai: renderGenerate, rules: renderRules, quality: renderQuality, export: renderExport };
   if (!pages[state.view]) state.view = 'script';
   // Background updates must keep the live textarea and its native undo history.
   const liveEditor = document.activeElement?.matches?.('textarea[data-highlight-layer]') ? document.activeElement
@@ -3586,7 +3875,14 @@ function render() {
   assistantUI.afterRender();
   window.DirectorUIMotion?.afterRender(state.project ? state.view : 'welcome');
   observeTopbar();
-  if(state.view==='quality-center')void automationUI.load();
+  const assetScope = state.view === 'assets' ? JSON.stringify([state.project.projectPath, state.project.currentEpisode]) : '';
+  if (displayedAssetScope !== assetScope) {
+    displayedAssetScope = assetScope;
+    if (assetScope) void refreshAssetPromptLibrary({ silent: true });
+    else { state.assetPromptLibrary = null; assetBatchUI.trimCache?.(); }
+  }
+  if (state.view === 'assets') assetBatchUI.afterRender();
+  if(state.view==='automation'||state.view==='quality-center')void automationUI.load();
   if(['director-home','shot-studio'].includes(state.view))directorUI.afterRender();
   if(state.view.startsWith('html-'))htmlLibraryUI.afterRender();
   refreshHighlightedEditors();
@@ -3611,6 +3907,7 @@ function render() {
   else if (state.actionDialog) renderActionDialog();
   else if (state.projectWizard) renderProjectWizard();
   else if (state.projectChooserOpen) renderProjectChooser();
+  else if (assetBatchUI.renderModal(modalRoot)) { /* Asset batch modal rendered */ }
   else closeModal();
   if (state.episodeDisplayTiming && state.episodeDisplayTiming.token === state.episodeLoadToken) {
     window.directorLastEpisodeTiming.displayMs = Math.round(performance.now() - state.episodeDisplayTiming.startedAt);
@@ -3629,7 +3926,10 @@ document.addEventListener('toggle', (event) => {
 function syncBoundInput(target, { committed = false } = {}) {
   if (!membershipCanEdit() || !state.project || !target.matches?.('[data-bind]') || !inputOwnerMatches(target)) return;
   const value = target.type === 'number' ? Number(target.value) : target.value;
-  const changed = getPath(state.project, target.dataset.bind) !== value;
+  const previous = getPath(state.project, target.dataset.bind);
+  const changed = typeof value === 'string' && typeof previous === 'string'
+    ? previous.replace(/\r\n/g, '\n') !== value.replace(/\r\n/g, '\n')
+    : previous !== value;
   if (!changed && !committed) return;
   if (changed) {
     setPath(state.project, target.dataset.bind, value);
@@ -3651,6 +3951,7 @@ function syncBoundInput(target, { committed = false } = {}) {
 
 document.addEventListener('input', (event) => {
   const target = event.target;
+  if (assetBatchUI.handleInput(event)) return;
   if (target.id === 'recent-project-search') {
     state.projectHistoryQuery = target.value;
     const rows = document.querySelector('#recent-project-rows');
@@ -3661,7 +3962,7 @@ document.addEventListener('input', (event) => {
     composingInputOwners.set(target, target.dataset?.editorContext || viewportContextKey());
   }
   if (event.isComposing && target.matches?.('textarea[data-highlight-layer]')) {
-    const previous = compositionViews.get(target) || { baseValue: String(getPath(state.project, target.dataset.bind) || ''), start: Math.max(0, target.selectionStart - String(event.data || '').length), end: Math.max(0, target.selectionStart - String(event.data || '').length) };
+    const previous = compositionViews.get(target) || { baseValue: String(getPath(state.project, target.dataset.bind) || '').replace(/\r\n/g, '\n'), start: Math.max(0, target.selectionStart - String(event.data || '').length), end: Math.max(0, target.selectionStart - String(event.data || '').length) };
     compositionViews.set(target, { ...previous, data: String(event.data ?? previous.data ?? ''), useNative: true });
   }
   editorComposition.input(target, event.isComposing);
@@ -3676,8 +3977,8 @@ document.addEventListener('input', (event) => {
     if (target.id === 'find-replace-find') state.actionDialog.needle = target.value;
     if (target.id === 'find-replace-replace') state.actionDialog.replacement = target.value;
   }
-  if (target.matches('[data-inline-document-find]')) runInlineDocumentFind(target.dataset.inlineDocumentFind, target.value);
-  if (target.matches('[data-asset-find]')) runAssetSearch(target.value);
+  if (!event.isComposing && target.matches('[data-inline-document-find]')) runInlineDocumentFind(target.dataset.inlineDocumentFind, target.value);
+  if (!event.isComposing && target.matches('[data-asset-find]')) runAssetSearch(target.value);
   if (target.id === 'batch-template' && state.batchDraft) state.batchDraft.template = target.value;
   if (target.id === 'batch-manual-instruction' && state.batchDraft) state.batchDraft.manualInstruction = target.value;
   if (target.id === 'task-review-prompt' && state.taskReview) state.taskReview.prompt = target.value;
@@ -3697,13 +3998,17 @@ document.addEventListener('input', (event) => {
     });
   }
   if (target.matches('[data-bind]') && state.project) {
-    syncBoundInput(target);
+    if (!event.isComposing) syncBoundInput(target);
     if (target.matches('textarea[data-highlight-layer]') && !event.isComposing && !compositionActive) updateEditorStats(target);
     if (target.dataset.highlightLayer && editorComposition.isBlocked(target)) {
       updateHighlightedEditor(target, { composing: true });
     } else if (target.dataset.highlightLayer && !event.isComposing && !compositionActive) {
-      clearTimeout(highlightTimers.get(target));
-      highlightTimers.set(target,setTimeout(()=>{if(target.isConnected && !editorComposition.isBlocked(target))updateHighlightedEditor(target);},80));
+      if (!highlightTimers.has(target)) {
+        highlightTimers.set(target, requestAnimationFrame(() => {
+          highlightTimers.delete(target);
+          if (target.isConnected && !editorComposition.isBlocked(target)) updateHighlightedEditor(target);
+        }));
+      }
     }
   }
   if (target.matches('[data-asset-id]') && state.project) {
@@ -3779,8 +4084,24 @@ document.addEventListener('dblclick', (event) => {
 
 async function handleAppKeydown(event) {
   if (event.isComposing || event.keyCode === 229 || editorComposition.isBlocked(event.target)) return;
-  if(event.defaultPrevented||event.target.closest?.('#director-assistant-panel'))return;
-  if (modalRoot.querySelector('.modal')) return;
+  if (event.defaultPrevented || event.target.closest?.('#director-assistant-panel')) return;
+  if (document.querySelector('dialog[open]') || modalRoot.querySelector('.modal')) return;
+  if (event.target.matches?.('[data-inline-document-find]')) {
+    const kind = event.target.dataset.inlineDocumentFind;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      return navigateInlineDocumentFind(kind, event.shiftKey ? -1 : 1);
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (event.target.value) {
+        event.target.value = '';
+        runInlineDocumentFind(kind, '');
+      }
+      document.querySelector(`textarea[data-bind="${kind}.content"]`)?.focus({ preventScroll: true });
+      return;
+    }
+  }
   if (event.target.matches?.('[data-sidebar-resizer]') && ['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) {
     event.preventDefault();
     state.sidebarWidth = event.key === 'Home'
@@ -3795,15 +4116,13 @@ async function handleAppKeydown(event) {
     event.preventDefault();
     const editor = event.target;
     const hadSelection = editor.selectionEnd > editor.selectionStart;
-    const suffixLength = editor.value.length - editor.selectionEnd;
     const result = window.EditorFormatting?.toggleBold(editor.value, editor.selectionStart, editor.selectionEnd);
     if (!result) return;
-    editor.value = result.value;
-    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    replaceTextareaRange(editor, result.value);
     // Do not leave the original multi-line selection active: the textarea's
     // native selection paint would cover the semantic layer with large blue
     // rectangles and make the editor look scrambled.
-    const caret = hadSelection ? result.value.length - suffixLength : result.selectionStart;
+    const caret = hadSelection ? result.selectionEnd : result.selectionStart;
     editor.setSelectionRange(caret, caret);
     updateHighlightedEditor(editor);
     showToast(result.enabled ? '已加粗并高亮所选文字。' : '已取消加粗高亮。');
@@ -3832,6 +4151,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 async function handleAppChange(event) {
+  if (assetBatchUI.handleChange(event)) return;
   if (event.target.matches('[data-template-slot]')) {
     if (!membershipCanUseBuiltinTemplates()) {
       state.membershipModalOpen = true;
@@ -3866,7 +4186,13 @@ async function handleAppChange(event) {
   if (event.target.matches('[data-bind]') && state.project) {
     if (!inputOwnerMatches(event.target)) return;
     const value = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
+    const previous = getPath(state.project, event.target.dataset.bind);
+    const changed = typeof value === 'string' && typeof previous === 'string'
+      ? previous.replace(/\r\n/g, '\n') !== value.replace(/\r\n/g, '\n')
+      : previous !== value;
+    if (!changed) return;
     setPath(state.project, event.target.dataset.bind, value);
+    if (/^(?:source|outline|script|shotlist|storyboard)\.content$/.test(event.target.dataset.bind)) markDocumentDirty(event.target.dataset.bind);
     if (event.target.dataset.bind.startsWith('chatGptRunner.')) state.chromeStatus = null;
     markDirty();
     if (event.target.dataset.bind === 'generationMode') {
@@ -3925,7 +4251,7 @@ async function handleAppClick(event) {
   const button = event.target.closest('[data-action], [data-view]');
   if (!button) return;
   const requestedAction = button.dataset.action;
-  if (requestedAction?.startsWith('ux-')) return handleUsabilityAction(requestedAction);
+  if (requestedAction?.startsWith('ux-')) return handleUsabilityAction(requestedAction, button);
   if (requestedAction?.startsWith('workspace-')) return workspaceUI.action(requestedAction, button);
   if(requestedAction?.startsWith('assistant-'))return assistantUI.action(requestedAction,button);
   if(requestedAction?.startsWith('director-'))return directorUI.action(requestedAction,button);
@@ -3933,6 +4259,7 @@ async function handleAppClick(event) {
   if(requestedAction?.startsWith('flow-')||requestedAction?.startsWith('quality-'))return automationUI.action(requestedAction);
   if (requestedAction === 'open-membership') {
     state.membershipModalOpen = true;
+    await refreshMembership({ loadTemplates: false });
     renderMembershipModal();
     return;
   }
@@ -3941,13 +4268,30 @@ async function handleAppClick(event) {
     closeModal();
     return;
   }
+  if (requestedAction === 'membership-tab') {
+    state.membershipTab = button.dataset.tab === 'issuer' ? 'issuer' : 'activate';
+    renderMembershipModal();
+    return;
+  }
   if (requestedAction === 'membership-copy-machine') {
     await window.directorApi.productionCopy(state.membership?.machineCode || '');
+    window.DirectorUIMotion?.pulseDone?.(button, { label: '已复制' });
     return showToast('电脑识别码已复制。');
+  }
+  if (requestedAction === 'membership-paste-activate') {
+    state.membership = await window.directorApi.membershipPasteActivate();
+    await refreshMembership();
+    state.membershipModalOpen = true;
+    render();
+    return showToast('已从剪贴板一键激活会员！');
   }
   if (requestedAction === 'membership-activate') {
     const token = document.querySelector('#membership-token')?.value.trim();
-    if (!token) return showToast('请先粘贴激活码。');
+    if (!token) {
+      window.DirectorUIMotion?.shake('#membership-token');
+      document.querySelector('#membership-token')?.focus();
+      return showToast('请先粘贴激活码。');
+    }
     state.membership = await window.directorApi.membershipActivate(token);
     await refreshMembership();
     state.membershipModalOpen = true;
@@ -3970,6 +4314,78 @@ async function handleAppClick(event) {
     render();
     return showToast('当前授权已移除。');
   }
+  if (requestedAction === 'membership-admin-self-activate') {
+    await window.directorApi.membershipAdminSelfActivate('admin');
+    await refreshMembership();
+    state.membershipModalOpen = true;
+    render();
+    return showToast('本机永久管理员会员已激活！');
+  }
+  if (requestedAction === 'membership-issuer-plan') {
+    const syncIssuerInputs = () => {
+      const m = document.querySelector('#membership-issuer-machine');
+      const n = document.querySelector('#membership-issuer-name');
+      const mo = document.querySelector('#membership-issuer-months');
+      const yr = document.querySelector('#membership-issuer-years');
+      if (m) state.membershipIssuer.machineCode = m.value.trim();
+      if (n) state.membershipIssuer.memberName = n.value.trim();
+      if (mo) state.membershipIssuer.months = Math.max(1, Number(mo.value) || 1);
+      if (yr) state.membershipIssuer.years = Math.max(1, Number(yr.value) || 1);
+    };
+    syncIssuerInputs();
+    state.membershipIssuer.plan = button.dataset.plan || 'lifetime';
+    renderMembershipModal();
+    return;
+  }
+  if (requestedAction === 'membership-issuer-use-self') {
+    state.membershipIssuer.machineCode = state.membership?.machineCode || '';
+    renderMembershipModal();
+    return;
+  }
+  if (requestedAction === 'membership-issuer-paste-machine') {
+    const text = await window.directorApi.membershipReadClipboard();
+    const match = String(text || '').toUpperCase().match(/DT-(?:[0-9A-F]{6}-){3}[0-9A-F]{6}/);
+    state.membershipIssuer.machineCode = match ? match[0] : String(text || '').trim();
+    renderMembershipModal();
+    return showToast(match ? '已自动识别并填入电脑识别码。' : '已粘贴剪贴板内容，请核对识别码格式。');
+  }
+  if (requestedAction === 'membership-admin-issue') {
+    const machineInput = document.querySelector('#membership-issuer-machine');
+    const nameInput = document.querySelector('#membership-issuer-name');
+    const monthsInput = document.querySelector('#membership-issuer-months');
+    const yearsInput = document.querySelector('#membership-issuer-years');
+    const machineCode = (machineInput?.value ?? state.membershipIssuer.machineCode ?? '').trim();
+    const memberName = (nameInput?.value ?? state.membershipIssuer.memberName ?? '').trim();
+    const months = Math.max(1, Number(monthsInput?.value || state.membershipIssuer.months) || 1);
+    const years = Math.max(1, Number(yearsInput?.value || state.membershipIssuer.years) || 1);
+    state.membershipIssuer = { ...state.membershipIssuer, machineCode, memberName, months, years };
+    if (!machineCode) {
+      window.DirectorUIMotion?.shake('#membership-issuer-machine');
+      machineInput?.focus();
+      return showToast('请先填写或粘贴对方的电脑识别码。');
+    }
+    const issued = await window.directorApi.membershipAdminIssue({
+      plan: state.membershipIssuer.plan || 'lifetime',
+      machineCode, memberName, months, years
+    });
+    state.membershipIssuer.issued = issued;
+    renderMembershipModal();
+    return showToast(`已生成 ${issued.planLabel} 激活码，可直接复制发微信或保存文件。`);
+  }
+  if (requestedAction === 'membership-admin-copy-token') {
+    const token = state.membershipIssuer?.issued?.token;
+    if (!token) return showToast('请先生成激活码。');
+    await window.directorApi.productionCopy(token);
+    window.DirectorUIMotion?.pulseDone?.(button, { label: '已复制' });
+    return showToast('激活码已复制，直接发给对方一键粘贴即可激活。');
+  }
+  if (requestedAction === 'membership-admin-save-file') {
+    const issued = state.membershipIssuer?.issued;
+    if (!issued?.token) return showToast('请先生成激活码。');
+    const saved = await window.directorApi.membershipAdminSaveFile({ token: issued.token, suggestedFileName: issued.suggestedFileName });
+    if (saved) showToast(`已保存授权文件：${saved.fileName}`);
+    return;
+  }
   if (requestedAction === 'close-builtin-template') {
     state.builtinTemplatePreview = null;
     closeModal();
@@ -3985,6 +4401,7 @@ async function handleAppClick(event) {
   }
   if (requestedAction === 'copy-builtin-template') {
     await window.directorApi.productionCopy(state.builtinTemplatePreview?.content || '');
+    window.DirectorUIMotion?.pulseDone?.(button, { label: '已复制' });
     return showToast('内置提示词已复制。');
   }
   if (requestedAction === 'use-builtin-template') {
@@ -4001,6 +4418,7 @@ async function handleAppClick(event) {
     return showToast(`已设为当前模板：${selected.label}`);
   }
   if (button.dataset.view) {
+    if (!state.project) return;
     const nextView = button.dataset.view;
     state.view = nextView === 'editor' ? state.editorView : nextView;
     if (['outline', 'script', 'shotlist', 'storyboard'].includes(state.view)) state.editorView = state.view;
@@ -4008,15 +4426,16 @@ async function handleAppClick(event) {
     if (state.view === 'script' && state.project) queuePageCheck('script');
     if (state.view === 'shotlist' && state.project) queuePageCheck('shotlist');
     if (state.view === 'storyboard' && state.project) queuePageCheck('storyboard');
-    if (state.view === 'assets' && state.project) await refreshAssetPromptLibrary({ silent: true });
     return;
   }
   const action = button.dataset.action;
+  if (action === 'ui-toggle-password') return;
   if (!membershipCanEdit() && !membershipSafeActions.has(action)) {
     state.membershipModalOpen = true;
     render();
     return showToast('会员已到期，当前只能阅读。');
   }
+  if (action?.startsWith('asset-batch-')) return assetBatchUI.action(action, button, event);
   if (action?.startsWith('ai-') && await handleAiAction(action, button)) return;
   if (action?.startsWith('review-')) return reviewUI.action(action.slice(7), button);
   if (action === 'toggle-frog') return assistantUI.action('assistant-open');
@@ -4029,6 +4448,7 @@ async function handleAppClick(event) {
       const active=choice.dataset.theme===state.uiTheme;
       choice.classList.toggle('active',active);choice.setAttribute('aria-pressed',String(active));
     });
+    window.DirectorUIMotion?.syncGlideTracks?.();
     showToast(state.uiTheme === 'dark' ? '已切换为黑色夜间主题。' : state.uiTheme === 'morandi' ? '已切换为莫兰迪护眼主题。' : '已切换为明亮主题。');
     return;
   }
@@ -4191,7 +4611,11 @@ async function handleAppClick(event) {
   }
   if (action === 'wizard-next' || action === 'wizard-skip' || action === 'wizard-back') {
     rememberProjectWizardStep();
-    if (state.projectWizard.step === 0 && action === 'wizard-next' && !state.projectWizard.title) return showToast('请先填写项目名称。');
+    if (state.projectWizard.step === 0 && action === 'wizard-next' && !state.projectWizard.title) {
+      window.DirectorUIMotion?.shake('#new-project-title');
+      document.querySelector('#new-project-title')?.focus();
+      return showToast('请先填写项目名称。');
+    }
     state.projectWizard.step = Math.max(0, Math.min(2, state.projectWizard.step + (action === 'wizard-back' ? -1 : 1)));
     return renderProjectWizard();
   }
@@ -4212,7 +4636,11 @@ async function handleAppClick(event) {
   if (action === 'create-project') {
     rememberProjectWizardStep();
     const draft = state.projectWizard;
-    if (!draft?.title) return showToast('请先填写项目名称。');
+    if (!draft?.title) {
+      window.DirectorUIMotion?.shake('#new-project-title');
+      document.querySelector('#new-project-title')?.focus();
+      return showToast('请先填写项目名称。');
+    }
     if (!await saveCurrentProjectBeforeSwitch()) return;
     const project = await window.directorApi.createProject({
       title: draft.title, parentPath: draft.parentPath || undefined,
@@ -4250,7 +4678,14 @@ async function handleAppClick(event) {
     return;
   }
   if (action === 'save-project') return saveProject();
-  if (action === 'rebuild-episodes') { rebuildEpisodes(); markDirty(); render(); return showToast('整季集数计划已更新。'); }
+  if (action === 'rebuild-episodes') { if (!await rebuildEpisodes({ manual: true })) return; markDirty(); render(); return showToast('整季集数计划已更新。'); }
+  if (action === 'fit-season-to-files') {
+    const fitted = await fitSeasonRangeToFiles();
+    if (fitted?.cancelled) return;
+    if (!fitted) return showToast('未识别到带集号的文件，集数范围保持不变。');
+    markDirty(); render();
+    return showToast(`已按已有${fitted.fromWorkFiles ? '制作' : '原文'}文件收紧为第 ${fitted.start}–${fitted.end} 集（共 ${fitted.count} 集）；保存后生效。`);
+  }
   if (action === 'split-episode') {
     const base = directorEpisodeSlots.baseNumber(state.project.currentEpisode);
     if (!directorEpisodeSlots.episodeByKey(state.project, base) ||
@@ -4285,12 +4720,13 @@ async function handleAppClick(event) {
   if (action === 'load-source-file') {
     const sourceFile = (state.project.source.files || []).find((file) => file.path === button.dataset.sourcePath);
     const episodeNumber = Number(sourceFile?.episodeNumber) || episodeNumberFromFileName(sourceFile?.name);
-    if (episodeNumber && state.project.episodes.some((episode) => Number(episode.number) === episodeNumber)) {
+    if (episodeNumber && Number(episodeNumber) !== Number(state.project.currentEpisode)
+        && state.project.episodes.some((episode) => Number(episode.number) === episodeNumber)) {
       if (!await confirmSaveBeforeEpisodeChange(episodeNumber)) return;
-      if (!await activateEpisode(episodeNumber)) return;
-      markDirty();
+      if (!await activateEpisode(episodeNumber, { preferredSourcePath: button.dataset.sourcePath })) return;
+      scheduleEpisodePositionSave();
       render();
-      return showToast(`已切换到第 ${episodeNumber} 集原文。`);
+      return showToast(`已切换到第 ${directorEpisodeSlots.label(state.project, episodeNumber)} 集原文。`);
     }
     return openFolderDocument('source', button.dataset.sourcePath);
   }
@@ -4300,11 +4736,17 @@ async function handleAppClick(event) {
     const kind = button.dataset.kind;
     button.disabled = true;
     button.textContent = '正在导出…';
+    let exported = false;
     try {
       const file = await window.directorApi.exportDocumentWord(state.project, kind, contentForKind(kind), state.project.activeFiles?.[kind] || '');
+      exported = true;
       showToast(`已导出 Word：${file.name}`);
     } finally {
-      if (button.isConnected) { button.disabled = false; button.textContent = '导出 Word'; }
+      if (button.isConnected) {
+        button.disabled = false;
+        button.textContent = '导出 Word';
+        if (exported) window.DirectorUIMotion?.pulseDone?.(button, { label: '已导出' });
+      }
     }
     return;
   }
@@ -4312,6 +4754,15 @@ async function handleAppClick(event) {
     state.assetFilter = assetPromptCategoryMeta[button.dataset.assetFilter] ? button.dataset.assetFilter : 'role';
     render();
     return;
+  }
+  if (action === 'import-asset-manifest' || action === 'bind-archive-root') {
+    const project = state.project;
+    const importing = action === 'import-asset-manifest';
+    const result = importing ? await window.directorApi.importAssetManifest(project) : await window.directorApi.bindArchiveRoot(project);
+    if (result == null || state.project?.projectPath !== project.projectPath) return;
+    await refreshAssetPromptLibrary({ silent: true });
+    assetBatchUI.invalidate();
+    return showToast(importing ? '已导入 ' + result + ' 条归档记录。' : '本机归档目录已绑定。');
   }
   if (action === 'refresh-asset-prompts') return refreshAssetPromptLibrary();
   if (action === 'add-asset') return addAssets(button.dataset.assetCategory);
@@ -4431,11 +4882,12 @@ function dismissStartupSplash() {
 
 window.directorCloseState = () => ({
   dirty: Boolean(state.dirty || dirtyDocumentKinds().length || reviewUI.hasDrafts()),
-  running: Boolean(state.singleTaskRunning || assistantUI.isBusy() || directorUI.isBusy() || automationUI.isBusy() || state.batchRunning || state.workflowRunning || state.apiBatch?.status === 'running'),
+  running: Boolean(state.singleTaskRunning || assetBatchUI.isBusy() || assistantUI.isBusy() || directorUI.isBusy() || automationUI.isBusy() || state.batchRunning || state.workflowRunning || state.apiBatch?.status === 'running'),
   episodeLabel: state.project ? directorEpisodeSlots.label(state.project, state.project.currentEpisode) : ''
 });
 
 window.directorSaveBeforeClose = async () => {
+  await flushEpisodePositionSave();
   await documentSaveQueue.drain();
   await projectSaveQueue.drain();
   await reviewUI.saveDrafts();
@@ -4460,6 +4912,9 @@ window.addEventListener('beforeunload', event => {
       state.projectSync.set(key, event);
       updateSaveIndicators();
     });
+    window.directorApi.onProjectNotice?.(notice => {
+      if (notice?.message) showToast(notice.message);
+    });
     const runtime = await window.directorApi.runtimeInfo?.();
     window.directorRuntimeInfo = runtime;
     if (runtime?.compatGpu) {
@@ -4483,17 +4938,33 @@ window.addEventListener('beforeunload', event => {
     const lastPath = workspaceBootstrap.projectPath ? projectPathKey(workspaceBootstrap.projectPath) : lastProjectPath();
     const recentProject = state.projects.find(project => !project.unavailable && projectPathKey(project.projectPath) === lastPath)
       || state.projects.find(project => !project.unavailable);
-    state.project = workspaceBootstrap.projectPath ? await window.directorApi.openProjectFolder(workspaceBootstrap.projectPath) : recentProject ? await window.directorApi.openProjectFolder(recentProject.projectPath) : null;
+    let startupOpenNotice = '';
+    const startupTarget = workspaceBootstrap.projectPath || recentProject?.projectPath || '';
+    if (startupTarget) {
+      try {
+        state.project = await window.directorApi.openProjectFolder(startupTarget);
+      } catch (openError) {
+        state.project = null;
+        startupOpenNotice = `上次项目暂时无法打开（${openError?.message || openError}），请重新选择项目。`;
+      }
+    } else {
+      state.project = null;
+    }
     if (workspaceBootstrap.view) state.view = workspaceBootstrap.view;
     rememberActiveProject(state.project);
     if (state.project) {
-      const existing = state.projects.findIndex((item) => item.projectPath === state.project.projectPath);
+      const existing = state.projects.findIndex((item) => projectPathKey(item.projectPath) === projectPathKey(state.project.projectPath));
       if (existing >= 0) state.projects[existing] = state.project;
       else state.projects.unshift(state.project);
+      try {
+        await activateEpisode(workspaceBootstrap.episode || state.project.currentEpisode, { preferKnownFiles: true });
+      } catch (episodeError) {
+        startupOpenNotice = `读取集数文档失败（${episodeError?.message || episodeError}），可尝试切换集数或重新打开项目。`;
+      }
     }
-    if (state.project) await activateEpisode(workspaceBootstrap.episode || state.project.currentEpisode, { preferKnownFiles: true });
     render();
     dismissStartupSplash();
+    if (startupOpenNotice) showToast(startupOpenNotice);
     window.setInterval(async () => {
       try {
         const previous = state.membership;

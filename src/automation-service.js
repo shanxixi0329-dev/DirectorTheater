@@ -5,8 +5,9 @@ const crypto = require('node:crypto');
 const core = require('./ai-core');
 const slots = require('./episode-slots');
 const F = require('./workflow-files');
-const STAGES = [['outline','大纲'],['script','剧本'],['relationships','人物关系网'],['assets','资产与图片提示词'],['shotlist','分镜'],['storyboard','视频提示词'],['check','检查']];
-const FOLDERS = {source:'00 小说原文',outline:'02 大纲/分集大纲',script:'03 剧本',relationships:'06 资产/人物关系数据/分集数据',assets:'06 资产/分集数据',shotlist:'04 分镜',storyboard:'05 seedance提示词',check:'检查报告/制作流程'};
+const { buildQueueFromAssetsRegistry } = require('./codex-queue-service');
+const STAGES = [['outline','大纲'],['script','剧本'],['relationships','人物关系网'],['assets','资产与图片提示词'],['assetImages','资产自动生图'],['shotlist','分镜'],['storyboard','视频提示词'],['check','检查']];
+const FOLDERS = {source:'00 小说原文',outline:'02 大纲/分集大纲',script:'03 剧本',relationships:'06 资产/人物关系数据/分集数据',assets:'06 资产/分集数据',assetImages:'.ai-director/asset-queues',shotlist:'04 分镜',storyboard:'05 seedance提示词',check:'检查报告/制作流程'};
 function splitNovel(text, chaptersPerEpisode=1, startEpisode=1) {
   const lines = String(text).replace(/^\uFEFF/,'').split(/\r?\n/), boundaries=[];
   for(let i=0;i<lines.length;i++) if(/^\s*(?:第\s*[〇零一二三四五六七八九十百千万两\d]+\s*[章回节]|(?:chapter)\s+\d+)\s*[^\n]{0,100}$/i.test(lines[i])) boundaries.push(i);
@@ -20,11 +21,16 @@ function splitNovel(text, chaptersPerEpisode=1, startEpisode=1) {
 function options(input={}) {
   const start=Number(input.start)||1,end=Number(input.end)||start;
   if(!Number.isInteger(start)||!Number.isInteger(end)||start<1||end<start) throw Error('请填写正确的开始集和结束集。');
-  const stages=STAGES.map(([id])=>id).filter(id=>input.stages?.includes(id)??true);
+  const defaultStages=STAGES.map(([id])=>id).filter(id=>id!=='assetImages');
+  const requested=Array.isArray(input.stages)?input.stages:defaultStages;
+  const stages=STAGES.map(([id])=>id).filter(id=>requested.includes(id));
   if(!stages.length) throw Error('至少选择一个制作步骤。');
   return {start,end,stages,sourcePath:String(input.sourcePath||''),chaptersPerEpisode:Math.max(1,Math.trunc(Number(input.chaptersPerEpisode)||1)),
     firstEpisode:Math.max(1,Math.trunc(Number(input.firstEpisode)||1)),
     skipExisting:input.skipExisting!==false,instruction:String(input.instruction||''),assetStyle:String(input.assetStyle||'影视真人写实，统一年代、摄影、色彩与光线；场景为空景；道具白底。'),
+    imageProvider:String(input.imageProvider||'magpie').trim()||'magpie',
+    imageModel:String(input.imageModel||'codex/gpt-image-2').trim()||'codex/gpt-image-2',
+    imageConcurrency:Math.max(1,Math.min(8,Math.trunc(Number(input.imageConcurrency)||2))),
     quality:input.quality||{semantic:true},stopOnProblems:input.stopOnProblems!==false,mode:input.mode==='regenerate'?'regenerate':'resume'};
 }
 function validateEvidence(quote,text) {return typeof quote==='string' && quote.trim() && text.includes(quote);}
@@ -47,7 +53,7 @@ function validateAssets(data,source) {
   }
   return data;
 }
-function createAutomationService({readDocument,readTemplate,quality,publishDocument=F.publish,assertEdit=async()=>{},complete=core.chatCompletion,onEvent=()=>{}}) {
+function createAutomationService({readDocument,readTemplate,quality,publishDocument=F.publish,assertEdit=async()=>{},complete=core.chatCompletion,runAssetImages=null,onEvent=()=>{}}) {
   let controller,active;
   const jobPath = p => F.inside(p,'.ai-director/自动制作.json');
   async function load(project) {
@@ -160,19 +166,25 @@ function createAutomationService({readDocument,readTemplate,quality,publishDocum
     const safe=v=>JSON.stringify(v).replace(/</g,'\\u003c');
     graph=graph.replace(/const NODES=\[[\s\S]*?\];/,()=>`const NODES=${safe(nodes)};`).replace(/const EDGES=\[[\s\S]*?\];/,()=>`const EDGES=${safe(edges)};`)
       .replace(/const GROUP_COLORS=\{[^;]*\};/,()=>`const GROUP_COLORS=${safe(Object.fromEntries([...new Set(nodes.map(n=>n.group || '未分组'))].map((name,i)=>[name,['#f3c969','#a08cff','#62c3ff','#ef8ecb','#8c9bad'][i%5]])))};`)
-      .replace('示例作品 · 人物关系网',F.escapeHTML(project.title)+' · 人物关系网').replace('人物关系可视化 · 参考模板','人物关系网')
-      .replace('参考模板｜请替换 NODES 与 EDGES 数据、作品名和范围边界','仅包含已处理集数；证据来自分集原文').replace('示例数据仅用于演示交互，不代表任何具体作品事实','点击人物或关系查看原文证据')
-      .replace('未具名角色、流言和潜在关系应在这里集中说明，不要写成确定事实。',edges.filter(e=>e.certainty!=='confirmed').map(e=>F.escapeHTML(`${reg.nodes.find(n=>n.id===e.a)?.name} — ${e.label} — ${reg.nodes.find(n=>n.id===e.b)?.name}：${e.note || e.evidence}`)).join('<br>')||'当前没有待确认关系。');
+      .replace('示例作品 · 人物关系网',()=>F.escapeHTML(project.title)+' · 人物关系网').replace('人物关系可视化 · 参考模板',()=>'人物关系网')
+      .replace('参考模板｜请替换 NODES 与 EDGES 数据、作品名和范围边界',()=>'仅包含已处理集数；证据来自分集原文').replace('示例数据仅用于演示交互，不代表任何具体作品事实',()=>'点击人物或关系查看原文证据')
+      .replace('未具名角色、流言和潜在关系应在这里集中说明，不要写成确定事实。',()=>edges.filter(e=>e.certainty!=='confirmed').map(e=>F.escapeHTML(`${reg.nodes.find(n=>n.id===e.a)?.name} — ${e.label} — ${reg.nodes.find(n=>n.id===e.b)?.name}：${e.note || e.evidence}`)).join('<br>')||'当前没有待确认关系。');
     await F.write(F.inside(project,'06 资产/人物关系网.html'),graph);
     await F.write(F.inside(project,'06 资产/人物关系数据.json'),JSON.stringify(reg,null,2));
     const count=Math.max(1,...reg.assets.flatMap(a=>a.episodes));
     const payload={title:project.title,episodeCount:count,generatedAt:new Date().toISOString(),sources:['character','scene','prop'].map(type=>({type,label:{character:'角色',scene:'场景',prop:'道具'}[type],file:{character:'角色',scene:'场景',prop:'道具'}[type]+'资产提示词.txt',notes:['来源：已处理集数；状态适用集数须结合证据使用'],assetCount:reg.assets.filter(a=>a.type===type).length,promptCount:reg.assets.filter(a=>a.type===type).reduce((n,a)=>n+a.variants.length,0)})),assets:reg.assets};
     let html=await F.read(path.join(__dirname,'workflow-templates/assets.html'));
-    html=html.replace('__ASSET_DATA__',()=>safe(payload)).replaceAll('__DISPLAY_TITLE__',F.escapeHTML(project.title)+'资产库').replaceAll('__PAGE_TITLE__','资产与图片提示词').replaceAll('__EPISODE_RANGE__',`01—${count}`);
+    html=html.replace('__ASSET_DATA__',()=>safe(payload)).replaceAll('__DISPLAY_TITLE__',()=>F.escapeHTML(project.title)+'资产库').replaceAll('__PAGE_TITLE__',()=>'资产与图片提示词').replaceAll('__EPISODE_RANGE__',()=>`01—${count}`);
     await F.write(F.inside(project,'06 资产/资产与图片提示词.html'),html);
     for(const type of ['character','scene','prop']) {
       const assets=reg.assets.filter(a=>a.type===type),label={character:'角色',scene:'场景',prop:'道具'}[type];
       await F.write(F.inside(project,`06 资产/${label}资产提示词.txt`),assets.map(a=>`${a.name}（首次出现：第${a.firstEpisode}集｜出现：${a.occurrenceText}）\n编号：${a.id}\n别名：${a.aliases.join('、')}\n来源：${a.evidenceList.map(e=>`第${e.episode}集：${e.quote}`).join('；')}\n${a.variants.map(v=>`${v.name}（适用：${v.applicability}）\n提示词：${v.prompt}\n`).join('\n')}`).join('\n\n'));
+    }
+    if(reg.assets.length){
+      try {
+        const autoQueue=buildQueueFromAssetsRegistry(reg,{projectTitle:project.title||''});
+        await F.write(F.inside(project,'.ai-director/资产出图队列.json'),JSON.stringify(autoQueue,null,2));
+      } catch { /* Keep library rebuild resilient even if partial prompts cannot yet normalize. */ }
     }
     return reg;
   }
@@ -200,21 +212,37 @@ function createAutomationService({readDocument,readTemplate,quality,publishDocum
           if(!ctx.source.trim()) throw Error('原文为空。');
           if(['relationships','assets','shotlist','storyboard','check'].includes(stage)&&!ctx.script.trim())throw Error('缺少本集剧本，请启用剧本步骤或选择已有剧本。');
           if(stage==='storyboard'&&!ctx.shotlist.trim())throw Error('缺少本集分镜，请启用分镜步骤或选择已有分镜。');
-          const structured=['relationships','assets','check'].includes(stage);
+          const structured=['relationships','assets','assetImages','check'].includes(stage);
           const format=['txt','md','docx'].includes(project.documentFormats?.[stage])?project.documentFormats[stage]:stage==='shotlist'?'md':'txt';
-          const key=`${episode.number}:${stage}`,output=F.inside(project,`${FOLDERS[stage]}/${structured?episode.number:slots.label(project,episode.number)+'集'}.${structured?'json':format}`);
-          const requirements=stage==='check'?'':await readTemplate(project,stage);
-          const fingerprint=F.hash(JSON.stringify({stage,source:ctx.source,outline:stage==='outline'?'':ctx.outline,script:['outline','script'].includes(stage)?'':ctx.script,shotlist:stage==='storyboard'?ctx.shotlist:'',previous:ctx.previous,instruction:opt.instruction,requirements,model:project.aiRunner?.model,registry:['assets','shotlist','storyboard','check'].includes(stage)?ctx.registry.assets:null,quality:stage==='check'?opt.quality:null,style:stage==='assets'?opt.assetStyle:null}));
+          const key=`${episode.number}:${stage}`,output=F.inside(project,`${FOLDERS[stage]}/${structured?episode.number:slots.fileStem(project,episode.number)}.${structured?'json':format}`);
+          const requirements=['check','assetImages'].includes(stage)?'':await readTemplate(project,stage);
+          const fingerprint=F.hash(JSON.stringify({stage,source:ctx.source,outline:stage==='outline'?'':ctx.outline,script:['outline','script'].includes(stage)?'':ctx.script,shotlist:stage==='storyboard'?ctx.shotlist:'',previous:ctx.previous,instruction:opt.instruction,requirements,model:stage==='assetImages'?opt.imageModel:project.aiRunner?.model,registry:['assets','assetImages','shotlist','storyboard','check'].includes(stage)?ctx.registry.assets:null,quality:stage==='check'?opt.quality:null,style:stage==='assets'?opt.assetStyle:null}));
           const record=job.records[key];
           const initialFile=structured?output:await selectFile(project,stage,episode.number,job);
           const initialBody=initialFile?await readDocument(initialFile).catch(()=>''):'';
           if(opt.mode==='resume'&&record?.inputHash===fingerprint&&record.status==='done'&&F.hash(await readDocument(record.file).catch(()=>''))===record.outputHash) {await log(project,job,'已完成且输入未变，跳过。');continue;}
-          if(opt.skipExisting&&opt.mode==='resume'&&(!record||record.status==='adopted')&&!['relationships','assets','check'].includes(stage)) {
+          if(opt.skipExisting&&opt.mode==='resume'&&(!record||record.status==='adopted')&&!['relationships','assets','assetImages','check'].includes(stage)) {
             const existing=await selectFile(project,stage,episode.number,job);if(existing){job.bindings[episode.number]={...(job.bindings[episode.number]||{}),[stage]:existing};job.records[key]={status:'adopted',file:existing,inputHash:fingerprint};await log(project,job,'引用已有文件；未重新生成。');continue;}
           }
           job.records[key]={status:'running',inputHash:fingerprint,file:output};await persist(project,job);
           let content;
-          if(stage==='check') {
+          if(stage==='assetImages') {
+            if(typeof runAssetImages!=='function') {
+              content=JSON.stringify({episode:episode.number,skipped:true,reason:'当前环境未挂载批量生图引擎。'},null,2);
+              await log(project,job,'未挂载批量生图驱动，已跳过本步。');
+            } else {
+              const regNow=await registry(project);
+              const imgSummary=await runAssetImages(project,{
+                episode:episode.number,
+                registry:regNow,
+                options:opt,
+                signal:controller.signal,
+                onLog:msg=>void log(project,job,msg)
+              });
+              cancelled();
+              content=JSON.stringify({episode:episode.number,...imgSummary},null,2);
+            }
+          } else if(stage==='check') {
             const reports=[];for(const kind of ['script','shotlist','storyboard'].filter(k=>ctx[k]?.trim())) {
               cancelled();reports.push(await quality.check({...project,currentEpisode:episode.number,source:{content:ctx.source},outline:{content:ctx.outline},script:{content:ctx.script},shotlist:{content:ctx.shotlist},activeFiles:job.bindings[episode.number]||{}},{kind,content:ctx[kind],source:ctx.source,script:ctx.script,shotlist:ctx.shotlist,previous:ctx.previous,assets:JSON.stringify(ctx.registry),settings:opt.quality}));
             }

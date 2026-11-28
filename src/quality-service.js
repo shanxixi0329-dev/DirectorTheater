@@ -18,8 +18,11 @@ function policy(value = {}) {
     instruction: String(value.instruction || '').slice(0,20000) };
 }
 function dialogues(text) {
-  return String(text).split(/\r?\n/).filter(line => !/^\s*(?:场景|时间|地点|人物|镜头|提示词|参考素材|生成模型|画面|音效|时长)[：:]/.test(line) && /(?:[：:]\s*[“"「]|(?:V\.?O\.?|O\.?S\.?)\s*[：:]|^\s*[\u4e00-\u9fffA-Za-z]{1,12}(?:\s*[（(][^\n]{0,25}[）)])?\s*[：:])/.test(line))
-    .map(line => line.replace(/\s+/g, '').replace(/[“”「」"]/g,''));
+  return String(text).split(/\r?\n/)
+    .filter(line => !/^\s*(?:\*\*)?(?:场景|时间|地点|人物|镜头|提示词|参考素材|生成模型|画面|音效|时长)(?:\*\*)?[：:]/.test(line)
+      && (/(?:[：:]\s*[“"「]|(?:V\.?O\.?|O\.?S\.?)\s*[：:]|^\s*(?:\*\*)?[\u4e00-\u9fffA-Za-z]{1,12}(?:\*\*)?(?:\s*[（(][^\n]{0,25}[）)])?\s*[：:])/.test(line)
+        || /\{[^}\r\n]+\}/.test(line)))
+    .map(line => line.replace(/\*\*/g, '').replace(/\s+/g, '').replace(/[“”「」"]/g, ''));
 }
 function normalizeIssues(value, texts) {
   if (!Array.isArray(value)) throw Error('检查报告缺少 issues 列表，请重试。');
@@ -68,9 +71,10 @@ function createQualityService({ readDocument, saveDocument, localScript = () => 
       coverage.push('已完成本地格式检查');
     }
     if (settings.items.includes('dialogue')) {
+      const localLocation = x => x.location || [x.group ? `第${x.group}组` : '', x.shot ? `镜头${x.shot}` : '', x.line ? `第${x.line}行` : ''].filter(Boolean).join(' · ');
       if(kind==='script'&&!/[“「"][^”」"]+[”」"]/.test(source)){coverage.push('原文缺少可逐字核对的引号台词，忠实度需人工确认');incomplete=true;}
-      if (kind === 'script' && source.trim()) issues.push(...localScript(content,source).filter(x => x.level !== 'pass').map(x => ({...x,title:x.message || x.title,item:'dialogue',origin:'本地台词检查'})));
-      else if (kind === 'storyboard' && script.trim()) issues.push(...localPrompt(content,script,shotlist).filter(x => x.level !== 'pass' && /台词|对白|说话|人物|角色|V\.?O|O\.?S/i.test(x.title+' '+x.detail)).map(x => ({...x,title:x.message || x.title,item:'dialogue',origin:'本地提示词检查'})));
+      if (kind === 'script' && source.trim()) issues.push(...localScript(content,source).filter(x => x.level !== 'pass').map(x => ({...x,title:x.message || x.title,explanation:x.explanation || x.detail || '',location:localLocation(x),item:'dialogue',origin:'本地台词检查'})));
+      else if (kind === 'storyboard' && script.trim()) issues.push(...localPrompt(content,script,shotlist).filter(x => x.level !== 'pass' && /台词|对白|说话|人物|角色|V\.?O|O\.?S/i.test(x.title+' '+x.detail)).map(x => ({...x,title:x.message || x.title,explanation:x.explanation || x.detail || '',location:localLocation(x),item:'dialogue',origin:'本地提示词检查'})));
       else coverage.push('台词来源不足，相关检查待补齐材料');
     }
     for (let index = issues.length - 1; index >= 0; index -= 1) {
@@ -89,8 +93,8 @@ function createQualityService({ readDocument, saveDocument, localScript = () => 
     if(settings.items.includes('assets')){
       let assets=[];try{assets=typeof input.assets==='string'?JSON.parse(input.assets).assets||[]:input.assets?.assets||[];}catch{}
       if(!assets.length){coverage.push('当前没有制作资产库，名称一致性待补齐资料');incomplete=true;}
-      else if(kind==='storyboard')for(const match of content.matchAll(/@([^\s@[\]{}<>"'`，。；：、,.!?！？;:()（）]+)/g)){
-        const name=match[1];if(/^图片\d+$/.test(name))continue;
+      else if(kind==='storyboard')for(const match of content.matchAll(/@\[([^\]\r\n]+)\]|@([^\s@[\]{}<>"'`，。；：、,.!?！？;:()（）]+)/g)){
+        const name=(match[1] || match[2] || '').trim();if(!name || /^图片\d+$/.test(name))continue;
         const asset=assets.find(a=>[a.name,a.id,...(a.aliases||[])].includes(name));
         if(!asset)issues.push({level:'warning',title:`素材 @${name} 未在制作资产库中匹配`,quote:match[0],item:'assets',origin:'本地资产名称检查',suggestion:'核对素材名称，或补充资产库后重查。'});
         else if((asset.aliases||[]).includes(name))issues.push({level:'warning',title:`素材别名 @${name} 建议统一为 @${asset.name}`,quote:match[0],item:'assets',origin:'本地资产名称检查',suggestion:`统一使用 ${asset.id} ${asset.name}。`});
@@ -146,16 +150,31 @@ function createQualityService({ readDocument, saveDocument, localScript = () => 
     const companion=/\.txt$/i.test(report.path)&&['script','storyboard'].includes(report.kind)?report.path.replace(/\.txt$/i,'.docx'):'';
     if(companion)await fs.copyFile(companion,backup.replace(/\.txt$/i,'.docx')).catch(e=>{if(e.code!=='ENOENT')throw e;});
     const result = await saveDocument(project,report.kind,candidate.content,report.path);
-    await F.write(path.join(root(project),`已应用-${id}.json`),JSON.stringify({file:result.path || report.path,backup,companion,hash:F.hash(candidate.content)},null,2));
+    const savedFile = result.path || report.path;
+    const savedHash = F.hash(await readDocument(savedFile));
+    await F.write(path.join(root(project),`已应用-${id}.json`),JSON.stringify({file:savedFile,backup,companion,hash:savedHash},null,2));
     return {result,content:candidate.content,kind:report.kind,path:report.path,id,backup};
+  }
+  async function copyAtomically(from, to) {
+    const temp = `${to}.${crypto.randomUUID()}.tmp`;
+    try {
+      await fs.copyFile(from, temp);
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try { await fs.rename(temp, to); return; }
+        catch (error) {
+          if (!['EACCES', 'EBUSY', 'EPERM'].includes(error?.code) || attempt === 5) throw error;
+          await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+        }
+      }
+    } finally { await fs.rm(temp, { force: true }).catch(() => {}); }
   }
   async function undo(project,id) {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw Error('记录编号无效。');
     const info=F.parseJSON(await F.read(path.join(root(project),`已应用-${id}.json`)));
     F.inside(project,path.relative(project.projectPath,info.file)); F.inside(project,path.relative(project.projectPath,info.backup));
     if (F.hash(await readDocument(info.file))!==info.hash) throw Error('应用后又编辑过文件，请从备份人工合并，避免丢失新修改。');
-    await assertEdit(); await fs.copyFile(info.backup,info.file);
-    if(info.companion)await fs.copyFile(info.backup.replace(/\.txt$/i,'.docx'),info.companion).catch(e=>{if(e.code!=='ENOENT')throw e;});
+    await assertEdit(); await copyAtomically(info.backup,info.file);
+    if(info.companion)await copyAtomically(info.backup.replace(/\.txt$/i,'.docx'),info.companion).catch(e=>{if(e.code!=='ENOENT')throw e;});
     return {path:info.file};
   }
   return {items:ITEMS,policy,check:(p,i)=>withTask(()=>check(p,i)),propose:(p,r,i,s)=>withTask(()=>propose(p,r,i,s)),apply,undo,

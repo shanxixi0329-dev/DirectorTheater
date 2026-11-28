@@ -5,7 +5,7 @@
   }
 
   function parseClock(value) {
-    const match = String(value || '').trim().match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}(?:\.\d+)?))?$/);
+    const match = String(value || '').trim().match(/^(\d{1,2}):(\d{1,2}(?:\.\d+)?)(?::(\d{1,2}(?:\.\d+)?))?$/);
     if (!match) return null;
     if (match[3] !== undefined) return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
     return Number(match[1]) * 60 + Number(match[2]);
@@ -31,7 +31,8 @@
       .trim();
     if (!text) return null;
 
-    const timeline = text.match(/(\d+(?::\d+(?::\d+(?:\.\d+)?)?)?|\d+(?:[.,]\d+)?\s*(?:分钟?|分|秒))\s*-\s*(\d+(?::\d+(?::\d+(?:\.\d+)?)?)?|\d+(?:[.,]\d+)?\s*(?:分钟?|分|秒))/i);
+    const tp = '(?:\\d+:\\d+(?:\\.\\d+)?(?::\\d+(?:\\.\\d+)?)?|\\d+(?:[.,]\\d+)?\\s*(?:分钟?|分|秒|s(?:ec(?:ond)?s?)?)|\\d+(?:[.,]\\d+)?)';
+    const timeline = text.match(new RegExp(`(${tp})\\s*-\\s*(${tp})`, 'i'));
     if (timeline) {
       const start = parseTimePoint(timeline[1]);
       const end = parseTimePoint(timeline[2]);
@@ -93,7 +94,7 @@
     let tableShots = 0;
 
     for (const table of parseTables(text)) {
-      const durationIndex = table.headers.findIndex((cell) => /^时长(?:\s*[（(][^）)]*[）)])?$/.test(cell.replace(/\*+/g, '').trim()));
+      const durationIndex = table.headers.findIndex((cell) => /^(?:时长|时间码?|时间段)(?:\s*[（(][^）)]*[）)])?$/.test(cell.replace(/\*+/g, '').trim()));
       if (durationIndex < 0) continue;
       const detectedShotIndex = table.headers.findIndex((cell) => /^(?:镜号|镜头编号|镜头)$/.test(cell.replace(/\*+/g, '').trim()));
       const shotIndex = detectedShotIndex >= 0 ? detectedShotIndex : 0;
@@ -113,7 +114,7 @@
     for (const line of lines) {
       if (!/(?:镜头|镜号)\s*\d+/i.test(line)) continue;
       const explicit = line.match(/时长\s*[：:]?\s*([^，,；;|]+)/);
-      const bracketed = line.match(/[【\[]\s*([^\]】]*(?:秒|\d:\d)[^\]】]*)[\]】]/);
+      const bracketed = line.match(/[【\[]\s*([^\]】]*(?:秒|\d:\d|\d\s*s(?:ec(?:ond)?s?)?\b)[^\]】]*)[\]】]/i);
       const seconds = parseDuration(explicit?.[1] || bracketed?.[1] || '');
       if (seconds === null || seconds <= 0) continue;
       timedSeconds += seconds;

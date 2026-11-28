@@ -45,6 +45,9 @@ window.createReviewUI = function ({ project, view, api, canEdit, render, toast, 
     if (form && video?.dataset.videoId === s.selected) s.draft = { ...s.draft, text: form.value, prompt: document.querySelector('#review-note-prompt')?.value || s.draft.prompt || '',
       seconds: document.querySelector('#review-note-time').value, category: document.querySelector('#review-note-category').value, shotId:document.querySelector('#review-note-shot')?.value||'' };
     if (form && video?.dataset.videoId === s.selected) s.drafts[s.selected] = { ...s.draft };
+    if (video && view && view() !== 'review') {
+      try { video.pause(); video.removeAttribute('src'); video.load(); } catch {}
+    }
   }
   async function load(force = false) {
     const s = current(), p = project();
@@ -176,11 +179,15 @@ window.createReviewUI = function ({ project, view, api, canEdit, render, toast, 
     const picker=document.getElementById('review-note-shot'),v=selected(),p=project();
     if(!picker||v?.episode==null||!api.directorSnapshot||!(p?.episodes||[]).some(ep=>Number(ep.number)===Number(v.episode)))return;
     const videoId=v.id;picker.disabled=true;
-    const data=await api.directorSnapshot({...p,currentEpisode:v.episode});
-    if(picker!==document.getElementById('review-note-shot')||selected()?.id!==videoId)return;
-    picker.innerHTML='<option value="">不绑定镜头</option>'+data.shots.map(shot=>'<option value="'+e(shot.id)+'">'+e(shot.label)+' · '+e(shot.heading||'分镜表')+' · 第'+shot.line+'行</option>').join('');
-    if(s.draft.shotId&&!data.shots.some(shot=>shot.id===s.draft.shotId))picker.innerHTML+='<option value="'+e(s.draft.shotId)+'">旧镜头 '+e(s.draft.shotLabel||'')+'（已变化）</option>';
-    picker.value=s.draft.shotId||'';picker.disabled=!canEdit();
+    try {
+      const data=await api.directorSnapshot({...p,currentEpisode:v.episode});
+      if(picker!==document.getElementById('review-note-shot')||selected()?.id!==videoId)return;
+      picker.innerHTML='<option value="">不绑定镜头</option>'+data.shots.map(shot=>'<option value="'+e(shot.id)+'">'+e(shot.label)+' · '+e(shot.heading||'分镜表')+' · 第'+shot.line+'行</option>').join('');
+      if(s.draft.shotId&&!data.shots.some(shot=>shot.id===s.draft.shotId))picker.innerHTML+='<option value="'+e(s.draft.shotId)+'">旧镜头 '+e(s.draft.shotLabel||'')+'（已变化）</option>';
+      picker.value=s.draft.shotId||'';
+    } finally {
+      if(picker===document.getElementById('review-note-shot'))picker.disabled=!canEdit();
+    }
   }
   function afterRender() {
     load().catch((err) => toast(err.message));
@@ -264,7 +271,7 @@ window.createReviewUI = function ({ project, view, api, canEdit, render, toast, 
   window.addEventListener('resize', updateWorkspaceSize);
   document.addEventListener('fullscreenchange', () => {
     const video = document.querySelector('#review-video');
-    if (video) video.controls = document.fullscreenElement === video;
+    if (video) video.controls = true;
   });
   function restoreNavigation() {
     updateWorkspaceSize();
@@ -348,10 +355,27 @@ window.createReviewUI = function ({ project, view, api, canEdit, render, toast, 
     else if (name === 'delete') { if (await window.directorConfirm('删除这条意见？原截图和历史记录会保留。')) await save({ action: 'delete', id: button.dataset.id }); }
     else if (name === 'edit' || name === 'jump') {
       const note = s.db.notes.find((n) => n.id === button.dataset.id);
-      if (!note) return; s.selected = note.videoId; s.positions[s.selected] = { seconds: note.seconds, playing: false };
+      if (!note) return;
+      const targetVideo = s.db.videos.find((v) => v.id === note.videoId);
+      if (targetVideo?.episode != null && await onEpisodeChange?.(targetVideo.episode) === false) return;
+      const sameVideo = s.selected === note.videoId && view?.() === 'review' && document.querySelector('#review-video')?.dataset.videoId === note.videoId;
+      s.selected = note.videoId;
+      s.positions[s.selected] = { seconds: note.seconds, playing: false };
       s.draft = name === 'edit' ? { ...note, screenshot: '' } : (s.drafts[s.selected] || {});
-      document.querySelector('[data-view="review"]')?.click();
-      if (document.querySelector('#review-video')) draw();
+      skipRemember = true;
+      if (view?.() !== 'review') {
+        document.querySelector('[data-view="review"]')?.click();
+      } else {
+        draw();
+        if (sameVideo) {
+          const nextVideo = document.querySelector('#review-video');
+          if (nextVideo && nextVideo.readyState >= 1) {
+            nextVideo.pause();
+            nextVideo.currentTime = Math.min(note.seconds, Math.max(0, (nextVideo.duration || note.seconds) - 0.001));
+          }
+        }
+        if (name === 'edit') document.querySelector('#review-note-text')?.focus();
+      }
     } else if (name === 'export') {
       if(s.exporting)return;
       s.exporting=true;button.disabled=true;button.textContent='正在导出…';
@@ -367,7 +391,7 @@ window.createReviewUI = function ({ project, view, api, canEdit, render, toast, 
     // video control can move the document. Form fields and buttons retain
     // their normal keyboard behaviour.
     const video = document.querySelector('#review-video');
-    if (!video || !document.querySelector('.review-view') || document.querySelector('.modal-overlay,.review-image-overlay') || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    if (!video || !document.querySelector('.review-view') || document.querySelector('.modal-overlay,.review-image-overlay,dialog[open]') || ev.ctrlKey || ev.altKey || ev.metaKey) return;
     const target = ev.target;
     const isEditable = target instanceof Element && target.closest('input,textarea,select,[contenteditable="true"]');
     const isButton = target instanceof Element && target.closest('button,[role="button"]');
@@ -427,7 +451,7 @@ window.createReviewUI = function ({ project, view, api, canEdit, render, toast, 
         if (host && next) host.innerHTML = next.innerHTML;
       }
       const list = document.querySelector('.review-video-notes');
-      if (list && v) list.innerHTML = notesHTML(db.notes.filter(n => n.videoId === v.id));
+      if (list && v) list.innerHTML = notesHTML(db.notes.filter(n => n.videoId === v.id).sort((a, b) => a.seconds - b.seconds));
       document.querySelectorAll('.review-video-item').forEach(button => {
         const video = db.videos.find(item => item.id === button.dataset.videoId);
         if (video) button.classList.toggle('has-issues', Boolean(video.openCount || video.needsRevision));

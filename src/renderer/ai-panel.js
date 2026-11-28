@@ -10,6 +10,7 @@
  * ================================================================== */
 
 const AI_PROVIDER_FALLBACK = [
+  { id: 'magpie', label: 'Magpie 本机网关（直连 Codex / 路由组）', baseUrl: 'http://127.0.0.1:3425/v1', models: ['group/smart-split', 'codex/gpt-6.2-sol', 'codex/gpt-6.2-astra', 'auto/deepseek-v4.1-flash'], localGateway: true },
   { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-flash', 'deepseek-v4-pro'] },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', models: ['gpt-5.2', 'gpt-5.1', 'gpt-4.1', 'gpt-4o'] },
   { id: 'moonshot', label: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', models: ['kimi-k2-0905-preview', 'moonshot-v1-128k'] },
@@ -142,7 +143,7 @@ function renderAiPanel(embedded = false) {
         <div class="field"><label>服务商</label><select id="ai-provider">${aiProviders.map((item) => `<option value="${item.id}" ${runner.provider === item.id ? 'selected' : ''}>${escapeHTML(item.label)}</option>`).join('')}</select></div>
         <div class="field"><label>模型</label>${modelControl}<p class="hint">DeepSeek 模型请求开启高强度思考（high），自定义兼容接口也适用；是否返回可见思考以执行记录为准。Flash 与 Pro 使用不同模型 ID，按接口返回值核对。</p></div>
         <div class="field wide"><label>API 地址</label><input id="ai-base-url" value="${escapeHTML(runner.baseUrl || preset.baseUrl)}" placeholder="${escapeHTML(preset.baseUrl)}" /></div>
-        <div class="field wide"><label>API Key</label><input id="ai-api-key" type="password" value="${escapeHTML(runner.apiKey)}" placeholder="sk-..." autocomplete="off" /></div>
+        <div class="field wide"><label>API Key${preset.localGateway ? '（本机 Magpie 网关可留空）' : ''}</label><div class="ui-password-wrap"><input id="ai-api-key" type="password" value="${escapeHTML(runner.apiKey)}" placeholder="${preset.localGateway ? '本机网关无需 API Key，留空即可' : 'sk-...'}" autocomplete="off" />${window.DirectorUIMotion?.passwordEyeButtonHtml?.() || ''}</div></div>
         <div class="field wide"><label>每个对话处理几集</label><input id="ai-cap" type="number" min="1" max="50" step="1" value="${runner.conversationCap}" /><p class="hint">填 1：每生成一集都开启新对话；填 2、3、5 等：处理相应集数后再换新对话。可填写 1–50。</p></div>
       </div>
       <input id="ai-temperature" type="hidden" value="${runner.temperature}" />
@@ -847,6 +848,7 @@ async function aiStartBatch(forceFresh = false) {
   state.apiBatchMinimized = false;
   state.apiBatchLock = true;
   state.workLocked = true;
+  const startedProjectPath = state.project?.projectPath || '';
   state.workLabel = `${runFresh ? '正在重新生成' : '正在继续生成'}${AI_BATCH_KIND_LABEL[draft.kind]}，本次处理 ${toProcess.length} 集。`;
   render();
 
@@ -885,13 +887,27 @@ async function aiStartBatch(forceFresh = false) {
     state.workLocked = false;
     state.workLabel = '';
     state.apiBatchMinimized = false;
-    try {
-      state.project = ensureClientProjectShape(await window.directorApi.rescanProject(state.project));
-      state.projects = state.projects.map((item) => item.id === state.project.id ? state.project : item);
-      await activateEpisode(state.project.currentEpisode);
-      markDirty();
-      await saveProject({ renderAfter: false, preserveViewport: true });
-    } catch { /* 重扫失败不影响已落盘的成品 */ }
+    if (state.project && projectPathKey(state.project.projectPath) === projectPathKey(startedProjectPath)) {
+      try {
+        const dirtyKinds = dirtyDocumentKinds();
+        const preservedDrafts = Object.fromEntries(dirtyKinds.map(kind => [kind, state.project[kind]?.content]));
+        const preservedDirty = { ...state.documentDirty };
+        const currentEpisode = Number(state.project.currentEpisode);
+        state.project = ensureClientProjectShape(await window.directorApi.rescanProject(state.project));
+        state.projects = state.projects.map((item) => item.id === state.project.id ? state.project : item);
+        if (!dirtyKinds.length) {
+          await activateEpisode(currentEpisode);
+          markDirty();
+          await saveProject({ renderAfter: false, preserveViewport: true });
+        } else {
+          for (const kind of dirtyKinds) {
+            if (state.project[kind]) state.project[kind].content = preservedDrafts[kind];
+          }
+          state.documentDirty = preservedDirty;
+          showToast('批量生成已结束；你正在编辑的未保存草稿已保留。');
+        }
+      } catch { /* 重扫失败不影响已落盘的成品 */ }
+    }
     render();
   }
 }

@@ -43,7 +43,14 @@ function renderUsabilityDialog(dialog) {
     return true;
   }
   if (dialog.type === 'workspace-settings') {
-    modalRoot.innerHTML = `<div class="modal-overlay"><div class="modal action-dialog"><div class="modal-head"><h2>工作台界面</h2><button class="modal-close" data-action="close-action-dialog">×</button></div><p class="hint">不常用的工具放在“更多工具”，需要时随时打开。</p><label class="check-setting-row"><input type="checkbox" id="pin-optional-tools" ${readWorkspacePreferences().pinOptionalTools ? 'checked' : ''}><span><strong>常驻显示镜头工作台、检查与优化</strong><small>本地检查始终保留在编辑页面。</small></span></label><div class="form-actions"><button class="button" data-action="ux-workspace-save">保存界面设置</button></div></div></div>`;
+    const motionStatus = window.DirectorUIMotion?.get?.() || { preference: 'full', systemReduced: false };
+    const motionLevel = motionStatus.preference || 'full';
+    const motionChoices = [
+      ['full', '完整动效', '滑动指示与触感反馈'],
+      ['reduced', '精简反馈', '仅保留柔和色彩过渡'],
+      ['off', '关闭动效', '静态零动画，低功耗']
+    ];
+    modalRoot.innerHTML = `<div class="modal-overlay"><div class="modal action-dialog"><div class="modal-head"><h2>工作台界面</h2><button class="modal-close" data-action="close-action-dialog">×</button></div><p class="hint">不常用的工具放在“更多工具”，需要时随时打开。</p><label class="check-setting-row"><input type="checkbox" id="pin-optional-tools" ${readWorkspacePreferences().pinOptionalTools ? 'checked' : ''}><span><strong>常驻显示镜头工作台、检查与优化</strong><small>本地检查始终保留在编辑页面。</small></span></label><div class="ui-motion-setting"><div class="ui-motion-setting-head"><strong>界面动效与微交互</strong><small>${motionStatus.systemReduced ? '检测到系统减弱动画，完整档将自动降为精简' : '切页、复制、保存与校验反馈实时生效'}</small></div><div class="ui-motion-picker" role="group" aria-label="界面动效等级">${motionChoices.map(([id, title, note]) => `<button type="button" class="ui-motion-option ${motionLevel === id ? 'active' : ''}" data-action="ux-motion-level" data-motion-level="${id}" aria-pressed="${motionLevel === id}"><strong>${title}</strong><small>${note}</small></button>`).join('')}</div></div><div class="form-actions"><button class="button" data-action="ux-workspace-save">保存界面设置</button></div></div></div>`;
     return true;
   }
   return false;
@@ -54,7 +61,10 @@ function replacementHistory() {
 }
 
 function rememberReplacement(result) {
-  try { localStorage.setItem('director-replacements:' + projectPathKey(state.project.projectPath), JSON.stringify([{ ...result, at: new Date().toLocaleString('zh-CN') }, ...replacementHistory()].slice(0, 10))); } catch {}
+  try {
+    const existing = replacementHistory().filter(item => item.backupDirectory !== result.backupDirectory);
+    localStorage.setItem('director-replacements:' + projectPathKey(state.project.projectPath), JSON.stringify([{ ...result, at: result.at || new Date().toLocaleString('zh-CN') }, ...existing].slice(0, 10)));
+  } catch {}
 }
 
 function replacementOptions(dialog) {
@@ -83,7 +93,8 @@ function renderGlobalReplaceContent(dialog) {
     body = `<p class="hint">选择范围，查看命中位置，再勾选需要修改的文件。按原样匹配文字。</p><div class="replace-input-grid"><label class="field">查找内容<textarea id="find-replace-find" rows="3" ${busy ? 'disabled' : ''}>${escapeHTML(dialog.needle || '')}</textarea></label><label class="field">替换为<textarea id="find-replace-replace" rows="3" placeholder="留空表示删除" ${busy ? 'disabled' : ''}>${escapeHTML(dialog.replacement || '')}</textarea></label></div><fieldset class="replace-scope"><legend>文档范围</legend>${replacementScopes.map(([id, label]) => `<label><input type="checkbox" data-replace-scope="${id}" ${dialog.scopes.includes(id) ? 'checked' : ''} ${busy ? 'disabled' : ''}>${label}</label>`).join('')}</fieldset><fieldset class="replace-scope"><legend>文件类型</legend>${[['.txt', 'TXT'], ['.md', 'Markdown'], ['.docx', 'Word']].map(([id, label]) => `<label><input type="checkbox" data-replace-extension="${id}" ${dialog.extensions.includes(id) ? 'checked' : ''} ${busy ? 'disabled' : ''}>${label}</label>`).join('')}</fieldset>${backup}${previous ? `<p class="hint">最近一次替换：${escapeHTML(previous.at)} <button class="button quiet small" data-action="ux-replace-history">查看备份与撤销</button></p>` : ''}`;
   }
   const disabled = busy || dialog.saveFailed || (preview ? !preview.complete || !count : !dialog.scopes.length || !dialog.extensions.length);
-  modalRoot.innerHTML = `<div class="modal-overlay"><div class="modal action-dialog global-replace-dialog"><div class="modal-head"><div><span class="eyebrow">FIND & REPLACE</span><h2>${result ? '替换结果与备份' : '全局查找替换'}</h2></div><button class="modal-close" data-action="close-action-dialog" ${busy && dialog.busy !== 'search' ? 'disabled' : ''}>×</button></div><div class="replace-steps"><span class="${!preview && !result ? 'current' : ''}">1 选择范围</span><span class="${preview && !result ? 'current' : ''}">2 预览与勾选</span><span class="${result ? 'current' : ''}">3 结果与备份</span></div>${body}<p id="global-search-progress" class="hint" role="status">${escapeHTML(dialog.progressText || '')}</p>${dialog.error ? `<p class="replace-errors" role="alert">${escapeHTML(dialog.error)}</p>` : ''}<div class="form-actions replace-footer">${result ? '<button class="button" data-action="close-action-dialog">完成</button>' : `${preview ? `<button class="button secondary" data-action="ux-replace-back" ${busy ? 'disabled' : ''}>返回修改范围</button>` : '<button class="button secondary" data-action="close-action-dialog">取消</button>'}<button class="button" data-action="confirm-action-dialog" ${disabled ? 'disabled' : ''}>${busy ? '处理中…' : preview ? `确认替换 ${count} 处` : '查找并预览'}</button>`}</div></div></div>`;
+  const stepProgress = result ? 100 : preview ? 56 : 16;
+  modalRoot.innerHTML = `<div class="modal-overlay"><div class="modal action-dialog global-replace-dialog"><div class="modal-head"><div><span class="eyebrow">FIND & REPLACE</span><h2>${result ? '替换结果与备份' : '全局查找替换'}</h2></div><button class="modal-close" data-action="close-action-dialog" ${busy && dialog.busy !== 'search' ? 'disabled' : ''}>×</button></div><div class="replace-steps" style="--step-progress:${stepProgress}"><span class="${!preview && !result ? 'current' : 'done'}">1 选择范围</span><span class="${preview && !result ? 'current' : result ? 'done' : ''}">2 预览与勾选</span><span class="${result ? 'current' : ''}">3 结果与备份</span></div>${body}<p id="global-search-progress" class="hint" role="status">${escapeHTML(dialog.progressText || '')}</p>${dialog.error ? `<p class="replace-errors" role="alert">${escapeHTML(dialog.error)}</p>` : ''}<div class="form-actions replace-footer">${result ? '<button class="button" data-action="close-action-dialog">完成</button>' : `${preview ? `<button class="button secondary" data-action="ux-replace-back" ${busy ? 'disabled' : ''}>返回修改范围</button>` : '<button class="button secondary" data-action="close-action-dialog">取消</button>'}<button class="button" data-action="confirm-action-dialog" ${disabled ? 'disabled' : ''}>${busy ? '处理中…' : preview ? `确认替换 ${count} 处` : '查找并预览'}</button>`}</div></div></div>`;
 }
 
 function renderGlobalReplaceDialog(dialog) {
@@ -95,8 +106,16 @@ async function confirmGlobalReplaceDialog(dialog) {
   if (dialog.result || dialog.busy || dialog.saveFailed) return;
   dialog.needle = dialog.preview ? dialog.needle : document.querySelector('#find-replace-find').value;
   dialog.replacement = dialog.preview ? dialog.replacement : document.querySelector('#find-replace-replace').value;
-  if (!dialog.needle) return showToast('请填写要查找的内容。');
-  if (dialog.needle === dialog.replacement) return showToast('查找和替换内容相同，无需修改。');
+  if (!dialog.needle) {
+    window.DirectorUIMotion?.shake('#find-replace-find');
+    document.querySelector('#find-replace-find')?.focus();
+    return showToast('请填写要查找的内容。');
+  }
+  if (dialog.needle === dialog.replacement) {
+    window.DirectorUIMotion?.shake('#find-replace-replace');
+    document.querySelector('#find-replace-replace')?.focus();
+    return showToast('查找和替换内容相同，无需修改。');
+  }
   const isPreview = !dialog.preview;
   if (!isPreview && (!dialog.preview.complete || !selectedReplacementCount(dialog))) return;
   dialog.error = '';
@@ -119,15 +138,28 @@ async function confirmGlobalReplaceDialog(dialog) {
   finally { dialog.busy = ''; if (state.actionDialog === dialog) renderGlobalReplaceDialog(dialog); }
 }
 
-async function handleUsabilityAction(action) {
+async function handleUsabilityAction(action, button = null) {
   if (!action?.startsWith('ux-')) return false;
   const dialog = state.actionDialog;
   if (dialog?.busy) return true;
   if (action === 'ux-check-settings') {
+    if (!state.project) return true;
     state.actionDialog = { type: 'local-check-settings', draft: localCheckPolicy() };
     renderActionDialog();
   } else if (action === 'ux-workspace-settings') {
     state.actionDialog = { type: 'workspace-settings' }; renderActionDialog();
+  } else if (action === 'ux-motion-level') {
+    const level = button?.dataset?.motionLevel || 'full';
+    const next = window.DirectorUIMotion?.setLevel?.(level);
+    const active = next?.preference || level;
+    modalRoot.querySelectorAll('.ui-motion-option').forEach(option => {
+      const selected = option.dataset.motionLevel === active;
+      option.classList.toggle('active', selected);
+      option.setAttribute('aria-pressed', String(selected));
+    });
+    window.DirectorUIMotion?.syncGlideTracks?.(modalRoot);
+    const label = active === 'off' ? '已关闭界面动效。' : active === 'reduced' ? '已切换为精简反馈。' : '已切换为完整动效。';
+    showToast(label);
   } else if (action === 'ux-workspace-save') {
     localStorage.setItem('director-workspace-preferences', JSON.stringify({ pinOptionalTools: document.querySelector('#pin-optional-tools').checked }));
     closeActionDialog();
@@ -136,6 +168,7 @@ async function handleUsabilityAction(action) {
     if (action === 'ux-check-none') for (const kind of Object.keys(window.DirectorLocalChecks.catalog)) for (const key of Object.keys(dialog.draft[kind])) dialog.draft[kind][key] = false;
     renderActionDialog();
   } else if (action === 'ux-check-save') {
+    if (!state.project) return true;
     const previous = state.project.localCheckSettings;
     dialog.busy = 'saving';
     state.project.localCheckSettings = window.DirectorLocalChecks.normalize(dialog.draft);
@@ -164,9 +197,12 @@ async function handleUsabilityAction(action) {
   } else if (action === 'ux-replace-back') {
     dialog.preview = null; dialog.error = ''; dialog.progressText = ''; renderActionDialog();
   } else if (action === 'ux-backup-open') {
-    await window.directorApi.openReplacementBackup(state.project, dialog.result.backupDirectory);
+    try { await window.directorApi.openReplacementBackup(state.project, dialog.result.backupDirectory); }
+    catch (error) { dialog.error = String(error.message || error); renderActionDialog(); }
   } else if (action === 'ux-backup-copy') {
-    await window.directorApi.productionCopy(dialog.result.backupDirectory); showToast('备份路径已复制。');
+    await window.directorApi.productionCopy(dialog.result.backupDirectory);
+    window.DirectorUIMotion?.pulseDone?.(button, { label: '已复制' });
+    showToast('备份路径已复制。');
   } else if (action === 'ux-replace-history') {
     dialog.result = replacementHistory()[0]; renderActionDialog();
   } else if (action === 'ux-replace-undo') {
@@ -194,7 +230,7 @@ document.addEventListener('input', event => {
 });
 
 document.addEventListener('change', event => {
-  const dialog = state.actionDialog, target = event.target;
+  const dialog = typeof state === 'undefined' ? null : state.actionDialog, target = event.target;
   if (!dialog || dialog.busy) return;
   if (target.dataset.localCheck) {
     const keys = target.dataset.localCheck.split('.');

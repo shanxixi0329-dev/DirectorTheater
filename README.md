@@ -7,10 +7,10 @@
 **面向短剧与 AI 漫剧制作人员的 Windows 桌面工作台——从改稿到审片，专注这一集。**
 
 [![官网与在线演示](https://img.shields.io/badge/官网与在线演示-立即访问-d99445?style=for-the-badge)](https://director-theater-share.shanxixi0329.chatgpt.site/#demo)
-[![最新版本](https://img.shields.io/badge/Windows%20x64-V0.1.13-1f6a5c?style=for-the-badge)](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest)
+[![最新版本](https://img.shields.io/badge/Windows%20x64-V0.1.14-1f6a5c?style=for-the-badge)](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest)
 [![免费试用](https://img.shields.io/badge/公开版-7%20天编辑试用-2d3748?style=for-the-badge)](docs/activation.md)
 
-[官网与视频演示](https://director-theater-share.shanxixi0329.chatgpt.site/#demo) · [下载 Windows x64 安装包](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest) · [图文上手](docs/quickstart.md) · [会员激活](docs/activation.md) · [常见问题](docs/faq.md)
+[官网与视频演示](https://director-theater-share.shanxixi0329.chatgpt.site/#demo) · [下载 Windows x64 安装包](https://github.com/shanxixi0329-dev/DirectorTheater/releases/latest) · [图文上手](docs/quickstart.md) · [会员激活](docs/activation.md) · [常见问题](docs/faq.md) · [更新日志](CHANGELOG.md) · [隐私说明](PRIVACY.md)
 
 </div>
 
@@ -77,11 +77,20 @@
 
 - **按集编辑与快捷切集**：在原文、大纲、剧本、分镜表格和提示词之间一键切换。正文独立滚动、语义分色高亮、实时统计字数；支持**鼠标侧键切换上下集**（后退 = 上一集，前进 = 下一集），未保存时切集前自动提醒。
 - **多窗口双屏对照**：点击「独立窗口」或拖出标签，把大纲、剧本、分镜、提示词或审片页开成独立窗口，各窗口保持各自页面与集数，双屏对照改稿更顺手。
-- **三套主题与专注模式**：提供明亮、黑色夜间、莫兰迪护眼三套主题，支持一键收起侧栏进入全宽专注模式。
+- **三套主题、微交互与专注模式**：提供明亮、黑色夜间、莫兰迪护眼三套主题；支持在「界面设置」中切换完整动效 / 精简反馈 / 关闭动效三档微交互，一键收起侧栏进入全宽专注模式。
 - **素材归档与 HTML 可视化**：按当前集数自动匹配角色、场景、道具提示词；可在工作台内直接打开人物关系网、素材可视化、后期剪辑可视化等本地 HTML 资料。
-- **按自己的规则 AI 协同生成**：在规则页导入自己的剧本、分镜或提示词要求文件，配置 AI 服务后按步骤单集生成或批量生成。
+- **按自己的规则 AI 协同生成**：在规则页导入自己的剧本、分镜或提示词要求文件，配置 AI 服务后按步骤单集生成或批量生成；所有 API 密钥仅保存在本机用户目录加密存储中，绝不写入共享项目文件夹。
 - **时间点审片与整改交付**：在样片播放位置一键截图，自动带入秒数与画面并分类记录意见；复审时一键定位回看、标记已解决，并可按「待整改（仅问题文件）」范围导出 Excel 与离线网页。
 - **全局安全替换与本地掌控**：跨集全局替换支持先预览命中位置、逐文件勾选、替换前自动备份与随时一键撤销；全部项目文件保存在本地或共享目录中。
+
+---
+
+## 隐私、安全与第三方许可
+
+- **隐私说明**：查看 [PRIVACY.md](PRIVACY.md)（零遥测、本地优先、API 密钥本机隔离）。
+- **安全规范**：查看 [SECURITY.md](SECURITY.md)（问题报告方式与公开仓库边界）。
+- **第三方声明**：查看 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+- **版本记录**：查看 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 

@@ -17,11 +17,12 @@
     const selected = source.slice(start, end);
     const chunks = selected.split(/(\r?\n)/);
     const contentChunks = chunks.filter((chunk) => !/^\r?\n$/.test(chunk) && chunk.length > 0);
-    const allWrapped = contentChunks.length > 0 && contentChunks.every((chunk) => /^\*\*[\s\S]*\*\*$/.test(chunk));
+    const singleBoldChunk = /^\*\*(?:(?!\*\*)[\s\S])+\*\*$/;
+    const allWrapped = contentChunks.length > 0 && contentChunks.every((chunk) => singleBoldChunk.test(chunk));
     const replacement = chunks.map((chunk) => {
       if (/^\r?\n$/.test(chunk) || !chunk.length) return chunk;
       if (allWrapped) return chunk.slice(2, -2);
-      return /^\*\*[\s\S]*\*\*$/.test(chunk) ? chunk : `**${chunk}**`;
+      return singleBoldChunk.test(chunk) ? chunk : `**${chunk}**`;
     }).join('');
     const nextValue = `${source.slice(0, start)}${replacement}${source.slice(end)}`;
 

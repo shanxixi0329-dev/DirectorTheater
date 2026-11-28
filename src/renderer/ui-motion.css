@@ -1,10 +1,13 @@
 /* Director Theater — quiet cinema surfaces and intentional feedback.
    Never transform a workspace, editor, video, iframe, sticky container or modal.
-   Backgrounds are static: no ambient blur, shimmer, pointer follower or canvas. */
+   Backgrounds are static: no ambient blur, shimmer, pointer follower or canvas.
+   Selected micro-interaction primitives inspired by guanmo-ai/ui-moments (MIT). */
 :root {
   --ui-accent-art: #a67b42;
   --ui-accent-art-soft: #a67b4215;
   --ui-ease-out: cubic-bezier(.2, .75, .25, 1);
+  --ui-ease: cubic-bezier(.16, 1, .3, 1);
+  --ui-spring: cubic-bezier(.3, 1.45, .5, 1);
   --ui-motion-fast: 140ms;
   --ui-motion-standard: 220ms;
 }
@@ -108,17 +111,389 @@
   transition-duration: var(--ui-motion-fast);
   transition-timing-function: var(--ui-ease-out);
 }
-:root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close) {
+:root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close, .ui-password-toggle) {
   transition-property: background-color, border-color, color, opacity, transform;
 }
-:root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close):not(:disabled):active {
-  transform: translateY(1px);
+:root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close, .ui-password-toggle):not(:disabled):active {
+  transform: translateY(1px) scale(.985);
 }
 :root[data-ui-motion="full"] :is(.project-entry, .workflow-stage):not(:disabled):hover {
   border-color: var(--ui-accent-art);
 }
 :root[data-ui-motion="full"] :is(.source-file, .html-file, .director-shot, .review-video-item):focus-visible {
   outline-color: var(--ui-accent-art);
+}
+
+/* Tabular figures prevent width jitter on episode numbers, timers and counters. */
+:is(
+  .episode-rail button, .editor-stats, .shotlist-duration, .asset-batch-pill span,
+  .workspace-window-count, .metric, .asset-batch-progress-meta, #replace-selected-files,
+  #replace-selected-count
+) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Leaf Tabs / Plan Picker spring glide indicator behind local pill groups. */
+.theme-switcher,
+.workspace-tabs,
+.ui-motion-picker {
+  position: relative;
+}
+.ui-glide-pill {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 6px;
+}
+.theme-switcher .ui-glide-pill {
+  border-radius: 5px;
+  background: var(--black);
+}
+.theme-switcher[data-ui-glide-ready="true"] .theme-choice {
+  position: relative;
+  z-index: 1;
+}
+html[data-theme] .theme-switcher[data-ui-glide-ready="true"] .theme-choice.active,
+html[data-theme] .theme-switcher[data-ui-glide-ready="true"] .theme-choice.active:hover {
+  background: transparent;
+  color: var(--active-ink, #fff);
+}
+.workspace-tabs .ui-glide-pill {
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.workspace-tabs[data-ui-glide-ready="true"] .workspace-tab {
+  position: relative;
+  z-index: 1;
+}
+.workspace-tabs[data-ui-glide-ready="true"] .workspace-tab.active,
+.workspace-tabs[data-ui-glide-ready="true"] .workspace-tab.active:hover {
+  background: transparent;
+  box-shadow: none;
+  color: var(--green);
+}
+
+/* Motion intensity segmented selector in Workspace Settings. */
+.ui-motion-setting {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ui-motion-setting-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.ui-motion-setting-head strong { font-size: 13px; font-weight: 600; }
+.ui-motion-setting-head small { font-size: 11px; color: var(--muted); }
+.ui-motion-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft, var(--soft));
+}
+.ui-motion-picker .ui-glide-pill {
+  border-radius: 7px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--green) 42%, var(--line));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.ui-motion-option {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.ui-motion-option strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+}
+.ui-motion-option small {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.ui-motion-option:hover { color: var(--ink); }
+.ui-motion-option.active { color: var(--green); }
+.ui-motion-picker:not([data-ui-glide-ready="true"]) .ui-motion-option.active {
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+}
+
+/* Copy / Save / Export drawn checkmark confirmation (Copy Button / Download Ring). */
+.button[data-ui-done="true"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.button.secondary[data-ui-done="true"],
+.button.quiet[data-ui-done="true"],
+html[data-theme] .button.secondary[data-ui-done="true"],
+html[data-theme] .button.quiet[data-ui-done="true"] {
+  border-color: color-mix(in srgb, var(--green) 60%, var(--line));
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, var(--panel));
+}
+.button:not(.secondary):not(.quiet):not(.danger)[data-ui-done="true"] {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+:root[data-theme="dark"] .button:not(.secondary):not(.quiet):not(.danger)[data-ui-done="true"] {
+  color: #0f1b16;
+}
+.ui-done-check {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+:root[data-ui-motion="full"] .ui-done-check path {
+  stroke-dasharray: 22;
+  stroke-dashoffset: 22;
+  animation: ui-draw-check 260ms var(--ui-ease) forwards;
+}
+@keyframes ui-draw-check {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Validation micro-shake (Code Shake) strictly on local fields/controls. */
+[data-ui-invalid="true"] {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 18%, transparent);
+}
+[data-ui-invalid="true"]:focus,
+[data-ui-invalid="true"]:focus-visible {
+  outline: 2px solid var(--red) !important;
+}
+:root[data-ui-motion="full"] .ui-motion-shake {
+  animation: ui-code-shake 320ms var(--ui-ease) 1;
+}
+@keyframes ui-code-shake {
+  0%, 100% { transform: translateX(0); }
+  18% { transform: translateX(-6px); }
+  36% { transform: translateX(5px); }
+  54% { transform: translateX(-3.5px); }
+  72% { transform: translateX(2px); }
+  86% { transform: translateX(-1px); }
+}
+
+/* Semantic pill toast with status indicator dot and spring entrance. */
+#toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 32px));
+  border-radius: 999px;
+  padding: 10px 16px 10px 14px;
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  box-shadow: 0 12px 32px #0000002b;
+  transition: opacity 180ms var(--ui-ease), transform 260ms var(--ui-spring);
+}
+#toast::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--ui-accent-art);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent-art) 26%, transparent);
+}
+#toast[data-tone="ok"]::before {
+  background: #63d49b;
+  box-shadow: 0 0 0 3px #63d49b2b;
+}
+#toast[data-tone="error"]::before {
+  background: #f27474;
+  box-shadow: 0 0 0 3px #f274742d;
+}
+:root[data-theme="dark"] #toast {
+  background: #1f2a28;
+  color: #f0ece4;
+  border-color: #d9bd9133;
+}
+
+/* Calm concentric breath halo strictly on active running/saving badges (Breath Orb). */
+:is(.workspace-save-status.saving, .asset-batch-status.submitting, .asset-batch-status.pending) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+:is(.workspace-save-status.saving, .asset-batch-status.submitting, .asset-batch-status.pending)::before,
+.asset-batch-codex-bar.is-running > span::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 2px;
+  vertical-align: middle;
+}
+.asset-batch-codex-bar.is-running > span::before {
+  background: var(--green);
+  margin-right: 8px;
+}
+:root[data-ui-motion="full"] :is(.workspace-save-status.saving, .asset-batch-status.submitting, .asset-batch-status.pending)::before,
+:root[data-ui-motion="full"] .asset-batch-codex-bar.is-running > span::before {
+  animation: ui-breath-ring 1.8s var(--ui-ease) infinite;
+}
+@keyframes ui-breath-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* Animated eye-slash reveal control for API key inputs (Strength Meter). */
+.ui-password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ui-password-wrap > input {
+  width: 100%;
+  padding-right: 38px !important;
+}
+.ui-password-toggle {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  margin-top: -14px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.ui-password-toggle:hover {
+  background: var(--surface-hover, var(--soft));
+  color: var(--ink);
+}
+.ui-password-toggle[data-revealed="true"] {
+  color: var(--green);
+}
+.ui-eye-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ui-eye-pupil {
+  fill: currentColor;
+  stroke: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 180ms var(--ui-spring);
+}
+.ui-password-toggle[data-revealed="true"] .ui-eye-pupil {
+  transform: scale(1.12);
+}
+.ui-eye-slash {
+  stroke-dasharray: 22;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 200ms var(--ui-ease), opacity 160ms ease;
+}
+.ui-password-toggle[data-revealed="true"] .ui-eye-slash {
+  stroke-dashoffset: 22;
+  opacity: 0;
+}
+
+/* Subtle spring pop on checklist checkboxes (Stroke Checklist). */
+:root[data-ui-motion="full"] :is(
+  .check-setting-row, .replace-scope, .replace-file-row,
+  .asset-batch-check, .asset-batch-inline-check
+) input[type="checkbox"]:checked {
+  animation: ui-check-pop 240ms var(--ui-spring) 1;
+}
+@keyframes ui-check-pop {
+  0% { transform: scale(.86); }
+  55% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+
+/* Connected step progress track on Project Wizard & Global Replace (Step Track). */
+.wizard-steps,
+.replace-steps {
+  position: relative;
+  padding-bottom: 13px;
+}
+.wizard-steps::before,
+.wizard-steps::after,
+.replace-steps::before,
+.replace-steps::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  bottom: 3px;
+  height: 3px;
+  border-radius: 99px;
+}
+.wizard-steps::before,
+.replace-steps::before {
+  right: 8px;
+  background: color-mix(in srgb, var(--line) 80%, transparent);
+}
+.wizard-steps::after,
+.replace-steps::after {
+  width: calc((100% - 16px) * var(--step-progress, 0) / 100);
+  background: var(--green);
+  transition: width 280ms var(--ui-ease);
+}
+:is(.wizard-steps, .replace-steps) span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+:is(.wizard-steps, .replace-steps) span::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--line);
+}
+:is(.wizard-steps, .replace-steps) span.current::before {
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent);
+}
+:is(.wizard-steps, .replace-steps) span.done {
+  color: var(--ink);
+}
+:is(.wizard-steps, .replace-steps) span.done::before {
+  background: var(--green);
 }
 
 /* Page entries are marked by ui-motion.js only when navigation truly changes.
@@ -143,33 +518,60 @@
   .button, .nav-view-button, .theme-choice, .episode-rail button,
   .source-file, .html-file, .director-shot, .review-video-item,
   .asset-filter, .workflow-stage, .project-entry, .membership-chip,
-  .assistant-tabs button, .assistant-close
+  .assistant-tabs button, .assistant-close, .ui-password-toggle
 ) {
   transition-property: background-color, border-color, color;
   transition-duration: 80ms;
   transition-timing-function: ease-out;
 }
-:root[data-ui-motion="reduced"] :is(.ai-drawer, #toast, .asset-card) { transition: none; }
+:root[data-ui-motion="reduced"] :is(.ai-drawer, #toast, .asset-card, .ui-eye-slash, .ui-eye-pupil, .wizard-steps::after, .replace-steps::after, .asset-batch-progress-seg) {
+  transition: none;
+}
 :root[data-ui-motion="off"] :is(
   .button, .nav-view-button, .theme-choice, .episode-rail button,
   .source-file, .html-file, .director-shot, .review-video-item,
   .asset-filter, .workflow-stage, .project-entry, .document-format-select,
-  .membership-chip, .assistant-tabs button, .assistant-close,
-  .ai-drawer, #toast, .asset-card
+  .membership-chip, .assistant-tabs button, .assistant-close, .ui-password-toggle,
+  .ai-drawer, #toast, .asset-card, .review-note, .ui-eye-slash, .ui-eye-pupil,
+  .wizard-steps::after, .replace-steps::after, .asset-batch-progress-seg
 ) { transition: none !important; }
 :root[data-ui-motion="off"] .sidebar-resizer::after { transition: none !important; }
-:root:not([data-ui-motion="full"]) :is(.ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry) {
+:root:not([data-ui-motion="full"]) :is(
+  .ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry,
+  .ui-motion-shake, .ui-done-check path
+) {
   animation: none !important;
 }
+:root:not([data-ui-motion="full"]) .ui-done-check path {
+  stroke-dasharray: none;
+  stroke-dashoffset: 0;
+}
 :root[data-ui-motion="off"] .assistant-dock img { animation: none !important; }
-:root[data-ui-motion-paused="true"] :is(.ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry) {
+:root[data-ui-motion-paused="true"] :is(
+  .ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry,
+  .ui-motion-shake, .workspace-save-status.saving::before,
+  .asset-batch-status.submitting::before, .asset-batch-status.pending::before,
+  .asset-batch-codex-bar.is-running > span::before
+) {
   animation: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry { animation: none !important; }
-  :root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close):active {
+  :is(
+    .ui-motion-page-entry, .ui-motion-nav-entry, .ui-motion-modal-entry,
+    .ui-motion-shake, .ui-done-check path,
+    .workspace-save-status.saving::before,
+    .asset-batch-status.submitting::before,
+    .asset-batch-status.pending::before,
+    .asset-batch-codex-bar.is-running > span::before
+  ) { animation: none !important; }
+  .ui-done-check path { stroke-dasharray: none; stroke-dashoffset: 0; }
+  :root[data-ui-motion="full"] :is(.button, .nav-view-button, .theme-choice, .assistant-close, .ui-password-toggle):active {
     transform: none;
   }
+}
+
+@media (max-width: 600px) {
+  .ui-motion-picker { grid-template-columns: 1fr; }
 }
 
 /* The original generated flat tile is cropped only by its display frame. */

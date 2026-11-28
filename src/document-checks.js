@@ -257,7 +257,7 @@ function extractStoryboardDialogues(content, knownSpeakers = []) {
       const context = sequence.slice(shotStart, match.index);
       const spoken = match[1].trim();
       const normalized = normalizeDialogueText(spoken);
-      if (normalized.length < 2) continue;
+      if (!normalized.length) continue;
       const speakerName = extractStoryboardSpeaker(context, knownSpeakers);
       const shot = context.match(/镜头\s*(\d+(?:\s*-\s*\d+)*)\s*[：:]/)?.[1]?.replace(/\s+/g, '') || null;
       dialogues.push({ spoken, normalized, speakerName, markers: extractDialogueMarkers(context), index: match.index, group: group.number, shot });
@@ -364,8 +364,9 @@ function validateStoryboard(content, script = '', shotlist = '', value = {}) {
         if (speakers.length > 1) {
           results.push(checkResult('error', '单镜头多人发声', `镜头${shot.number}中${speakers.map((speaker) => '@' + speaker).join('、')}均有{ }台词，需要拆为独立镜头。`, group.number, shot.number));
         }
-      } else if (speech.length === 1) {
-        const words = chineseCharacters(speech[0][1]);
+      }
+      if (speech.length >= 1) {
+        const words = speech.reduce((sum, item) => sum + chineseCharacters(item[1]), 0);
         const available = shot.end - shot.start;
         if (available > 0 && words / 6 > available) {
           results.push(checkResult('warning', '口播时间不足', `镜头${shot.number}约${words}字，当前约${(words / available).toFixed(1)}字/秒；4–6字/秒为正常范围，至少需要${Math.ceil(words / 6)}秒。`, group.number, shot.number));

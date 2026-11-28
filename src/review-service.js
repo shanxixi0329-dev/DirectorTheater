@@ -63,9 +63,19 @@ function createReviewService() {
     db.updatedAt = new Date(Math.max(Date.now(), (Date.parse(db.updatedAt) || 0) + 1)).toISOString();
     const persisted = { ...db }; delete persisted.storageRoot;
     const dest = path.join(root, '审片记录.json'), temp = `${dest}.${crypto.randomUUID()}.tmp`;
-    await fs.writeFile(temp, JSON.stringify(persisted, null, 2), 'utf8');
-    await fs.copyFile(dest, `${dest}.bak`).catch((e) => { if (e.code !== 'ENOENT') throw e; });
-    await fs.rename(temp, dest);
+    try {
+      await fs.writeFile(temp, JSON.stringify(persisted, null, 2), 'utf8');
+      await fs.copyFile(dest, `${dest}.bak`).catch((e) => { if (e.code !== 'ENOENT') throw e; });
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try { await fs.rename(temp, dest); break; }
+        catch (error) {
+          if (!['EACCES', 'EBUSY', 'EPERM'].includes(error?.code) || attempt === 5) throw error;
+          await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+        }
+      }
+    } finally {
+      await fs.rm(temp, { force: true }).catch(() => {});
+    }
   }
   function present(project, db) {
     const root = db.storageRoot || rootOf(project);
@@ -167,10 +177,12 @@ function createReviewService() {
       return scope === 'all' || (scope === 'issues' ? hasOpen || video.status === 'issues' : video.status === 'passed' && !hasOpen);
     }).sort((a, b) => (a.episode ?? Infinity) - (b.episode ?? Infinity) || a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
     if (!videos.length) return { empty: true, directory: null, count: 0, videoCount: 0, scope, scopeLabel };
-    const directory = path.join(rootOf(project), '导出', `审片意见-${scopeLabel}-${stamp().replace(/[:.]/g, '-')}-${crypto.randomUUID().slice(0, 8)}`);
+    const storageRoot = db.storageRoot || rootOf(project);
+    const directory = path.join(storageRoot, '导出', `审片意见-${scopeLabel}-${stamp().replace(/[:.]/g, '-')}-${crypto.randomUUID().slice(0, 8)}`);
     await fs.mkdir(directory, { recursive: true });
     const rows = [['集数', '视频文件', '审核状态', '时间点', '问题描述', '提示词修改意见', '截图文件', '意见状态', '记录时间']];
     const cards = [];
+    const warnings = [];
     for (const video of videos) {
       const notes = db.notes.filter((n) => !n.deleted && n.videoId === video.id).sort((a, b) => a.seconds - b.seconds);
       const label = video.episode == null ? '未匹配集数' : `第${slots.label(project, video.episode)}集`;
@@ -180,18 +192,24 @@ function createReviewService() {
       for (const note of includedNotes.length ? includedNotes : [null]) {
         let image = '';
         if (note?.screenshot) {
-          image = `截图/${note.id}.png`;
-          await fs.mkdir(path.join(directory, '截图'), { recursive: true });
-          await fs.copyFile(path.join(rootOf(project), note.screenshot), path.join(directory, image));
+          const targetImage = `截图/${note.id}.png`;
+          try {
+            await fs.mkdir(path.join(directory, '截图'), { recursive: true });
+            await fs.copyFile(path.join(storageRoot, note.screenshot), path.join(directory, targetImage));
+            image = targetImage;
+          } catch (error) {
+            if (error?.code !== 'ENOENT') throw error;
+            warnings.push(`截图缺失：${note.screenshot}`);
+          }
         }
         rows.push([label, video.relative || video.name, status + (video.missing ? ' · 历史版本' : ''), note ? timeLabel(note.seconds) : '', (note?.shotLabel?'【镜头 '+note.shotLabel+'】\n':'')+(note?.text || summary), note?.prompt || '', image, note ? (note.resolved ? '已解决' : '待解决') : '', note?.createdAt || video.reviewedAt || '']);
-        cards.push(`<article><h2>${esc(label)} · ${esc(video.relative || video.name)}</h2><p>${esc(status)}${video.missing ? ' · 历史版本' : ''}${note ? ` · ${timeLabel(note.seconds)} · ${note.resolved ? '已解决' : '待解决'}` : ''}</p>${image ? `<img src="${image}" alt="视频截图"/>` : ''}<h3>问题描述</h3><pre>${esc((note?.shotLabel?'【镜头 '+note.shotLabel+'】\n':'')+(note?.text || summary || '无'))}</pre>${note?.prompt ? `<h3>提示词修改意见</h3><pre>${esc(note.prompt)}</pre>` : ''}</article>`);
+        cards.push(`<article><h2>${esc(label)} · ${esc(video.relative || video.name)}</h2><p>${esc(status)}${video.missing ? ' · 历史版本' : ''}${note ? ` · ${timeLabel(note.seconds)} · ${note.resolved ? '已解决' : '待解决'}` : ''}</p>${image ? `<img src="${image}" alt="视频截图"/>` : note?.screenshot ? '<p>（原截图文件缺失）</p>' : ''}<h3>问题描述</h3><pre>${esc((note?.shotLabel?'【镜头 '+note.shotLabel+'】\n':'')+(note?.text || summary || '无'))}</pre>${note?.prompt ? `<h3>提示词修改意见</h3><pre>${esc(note.prompt)}</pre>` : ''}</article>`);
       }
     }
     await fs.writeFile(path.join(directory, '审片意见.xlsx'), spreadsheet(rows));
     await fs.writeFile(path.join(directory, '审片意见.csv'), '\uFEFF' + rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""').replace(/^[=+@-]/, "'$&")}"`).join(',')).join('\r\n'), 'utf8');
     await fs.writeFile(path.join(directory, '审片意见.html'), `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>${esc(project.title)} 审片意见 · ${scopeLabel}</title><style>body{font:16px/1.6 system-ui;background:#f4f5f7;color:#19212b;max-width:1100px;margin:32px auto;padding:0 20px}article{background:white;border:1px solid #ddd;border-radius:12px;padding:24px;margin:20px 0}img{max-width:100%;max-height:460px}pre{white-space:pre-wrap;font:inherit}h2{font-size:20px}@media print{article{break-inside:avoid}}</style><h1>${esc(project.title)} · 审片意见 · ${scopeLabel}</h1><p>导出时间：${esc(stamp())} · ${videos.length} 个视频 · ${rows.length - 1} 条记录 · ${options.includeHistory === true ? '包含历史版本' : '仅当前视频'}；可打印为 PDF。</p>${cards.join('')}</html>`, 'utf8');
-    return { directory, count: rows.length - 1, videoCount: videos.length, scope, scopeLabel, empty: false };
+    return { directory, count: rows.length - 1, videoCount: videos.length, scope, scopeLabel, empty: false, warnings };
   }
   return { load, act, exportReport, rootOf };
 }

@@ -23,6 +23,13 @@ function decodeText(bytes) {
   catch { throw new Error('文本不是有效 UTF-8，请另存为 UTF-8 后重试。'); }
 }
 
+function normalizeDocxRawText(value) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n\n$/, '')
+    .replace(/\n\n/g, '\n');
+}
+
 async function scan(input, progress = () => {}) {
   const needle = String(input.needle || '');
   if (!needle) throw new Error('请填写要查找的内容。');
@@ -70,7 +77,7 @@ async function scan(input, progress = () => {}) {
       const digest = fingerprint(bytes);
       revision.update(JSON.stringify([path.relative(input.projectPath, file), digest]));
       const text = path.extname(file).toLowerCase() === '.docx'
-        ? (await timed(require('mammoth').extractRawText({ buffer: bytes }), '解析Word')).value
+        ? normalizeDocxRawText((await timed(require('mammoth').extractRawText({ buffer: bytes }), '解析Word')).value)
         : decodeText(bytes);
       let count = 0, offset = 0, index;
       while ((index = text.indexOf(needle, offset)) !== -1) { count += 1; offset = index + needle.length; }
@@ -128,4 +135,4 @@ function runSearch(input, { onProgress = () => {}, signal } = {}) {
   });
 }
 
-module.exports = { scan, runSearch, fingerprint };
+module.exports = { scan, runSearch, fingerprint, normalizeDocxRawText };

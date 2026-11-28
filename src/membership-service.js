@@ -5,10 +5,45 @@ const os = require('os');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { TRIAL_DAYS, PLANS, resolveMembership, verifyLicenseToken } = require('./membership-core');
+const { TRIAL_DAYS, PLANS, resolveMembership, verifyLicenseToken, signLicensePayload, normalizeMachineCode } = require('./membership-core');
 const { listBuiltinTemplates } = require('./template-library');
 
 const execFileAsync = promisify(execFile);
+
+function extractLicenseToken(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const match = text.match(/DT1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+  return match ? match[0] : text.replace(/\s+/g, '');
+}
+
+function addCalendarMonths(iso, months) {
+  const value = new Date(iso);
+  const day = value.getUTCDate();
+  value.setUTCDate(1);
+  value.setUTCMonth(value.getUTCMonth() + months);
+  const finalDay = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0)).getUTCDate();
+  value.setUTCDate(Math.min(day, finalDay));
+  return value.toISOString();
+}
+
+function addCalendarYears(iso, years) {
+  const value = new Date(iso);
+  const month = value.getUTCMonth();
+  const day = value.getUTCDate();
+  value.setUTCDate(1);
+  value.setUTCFullYear(value.getUTCFullYear() + years);
+  const finalDay = new Date(Date.UTC(value.getUTCFullYear(), month + 1, 0)).getUTCDate();
+  value.setUTCDate(Math.min(day, finalDay));
+  return value.toISOString();
+}
+
+function defaultLocalSigningKeyPath() {
+  return path.resolve(
+    process.env.DIRECTOR_THEATER_SIGNING_KEY
+    || path.join(process.env.LOCALAPPDATA || os.homedir(), 'DirectorTheater', 'Licensing', 'director-theater-v013-private.pem')
+  );
+}
 
 async function windowsMachineGuid() {
   if (process.platform !== 'win32') return '';
@@ -171,7 +206,8 @@ function createMembershipService({ app, dialog, mainWindow: getMainWindow }) {
   }
 
   async function activateToken(token) {
-    const compact = String(token || '').trim();
+    const compact = extractLicenseToken(token);
+    if (!compact) throw new Error('没有检测到有效的激活码。');
     const verification = verifyLicenseToken(compact, publicKeys, machineCode);
     if (!verification.valid) throw new Error(verification.reason || '授权无法激活。');
     await fs.mkdir(path.dirname(licensePath), { recursive: true });
@@ -187,6 +223,96 @@ function createMembershipService({ app, dialog, mainWindow: getMainWindow }) {
     });
     if (result.canceled || !result.filePaths?.[0]) return null;
     return activateToken(await fs.readFile(result.filePaths[0], 'utf8'));
+  }
+
+  async function readVerifiedLocalSigningKey() {
+    const keyPath = defaultLocalSigningKeyPath();
+    if (!fsSync.existsSync(keyPath)) return null;
+    try {
+      const privateKey = crypto.createPrivateKey(await fs.readFile(keyPath));
+      const v013PublicPem = await fs.readFile(path.join(__dirname, 'licensing', 'director-theater-public-v013.pem'), 'utf8');
+      const v013PublicKey = crypto.createPublicKey(v013PublicPem);
+      if (!crypto.createPublicKey(privateKey).equals(v013PublicKey)) return null;
+      return { privateKey, publicKey: v013PublicKey };
+    } catch {
+      return null;
+    }
+  }
+
+  async function localAdminStatus() {
+    if (!state) await init();
+    const verified = await readVerifiedLocalSigningKey();
+    return {
+      available: Boolean(verified),
+      machineCode
+    };
+  }
+
+  async function adminIssueLicense(input = {}) {
+    if (!state) await init();
+    const verified = await readVerifiedLocalSigningKey();
+    if (!verified) throw new Error('本机未检测到配套的管理员签发私钥，无法在当前电脑签发授权。');
+    const planId = String(input.plan || 'lifetime').trim().toLowerCase();
+    const plan = PLANS[planId];
+    if (!plan || planId === 'free') throw new Error('请选择有效的会员计划（Plus / Pro / 永久 / 开发者 / 管理员）。');
+    const rawMachine = String(input.machineCode || machineCode || '').trim();
+    const normalizedMachine = rawMachine === '*' ? '*' : normalizeMachineCode(rawMachine);
+    if (normalizedMachine !== '*' && !/^DT-(?:[0-9A-F]{6}-){3}[0-9A-F]{6}$/.test(normalizedMachine)) {
+      throw new Error('电脑识别码格式不正确，请粘贴完整的 DT-XXXXXX-XXXXXX-XXXXXX-XXXXXX。');
+    }
+    const memberName = String(input.memberName || '导演台剧场会员').trim() || '导演台剧场会员';
+    const issuedAt = new Date().toISOString();
+    const startsAt = issuedAt;
+    const months = Math.max(1, Math.min(120, Math.trunc(Number(input.months) || 1)));
+    const years = Math.max(1, Math.min(20, Math.trunc(Number(input.years) || 1)));
+    const expiresAt = plan.permanent ? null : planId === 'pro' ? addCalendarYears(startsAt, years) : addCalendarMonths(startsAt, months);
+    const payload = {
+      product: 'director-theater',
+      version: 1,
+      licenseId: crypto.randomUUID(),
+      plan: planId,
+      memberName,
+      machineCode: normalizedMachine,
+      issuedAt,
+      startsAt,
+      expiresAt,
+      note: String(input.note || '').trim(),
+      issuer: '导演台剧场管理员'
+    };
+    const token = signLicensePayload(payload, verified.privateKey);
+    const check = verifyLicenseToken(token, verified.publicKey, normalizedMachine === '*' ? machineCode : normalizedMachine, Date.parse(startsAt) + 1);
+    if (!check.valid) throw new Error(`授权自检失败：${check.reason}`);
+    const machineTag = normalizedMachine === '*' ? 'ALL' : normalizedMachine.replace(/[^A-Z0-9-]/g, '');
+    const suggestedFileName = `${planId}-${machineTag}-${payload.licenseId.slice(0, 8)}.dtlicense`;
+    return {
+      token,
+      payload,
+      planLabel: plan.label,
+      suggestedFileName
+    };
+  }
+
+  async function adminSelfActivate(plan = 'admin') {
+    const issued = await adminIssueLicense({
+      plan: PLANS[plan] && plan !== 'free' ? plan : 'admin',
+      machineCode,
+      memberName: '本机管理员'
+    });
+    const nextStatus = await activateToken(issued.token);
+    return { status: nextStatus, issued };
+  }
+
+  async function adminSaveLicenseFile({ token, suggestedFileName = 'director-theater.dtlicense' } = {}) {
+    const compact = extractLicenseToken(token);
+    if (!compact) throw new Error('没有可导出的授权内容。');
+    const result = await dialog.showSaveDialog(getMainWindow(), {
+      title: '导出导演台剧场授权文件',
+      defaultPath: suggestedFileName,
+      filters: [{ name: '导演台剧场授权', extensions: ['dtlicense'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, compact, 'utf8');
+    return { filePath: result.filePath, fileName: path.basename(result.filePath) };
   }
 
   async function removeLicense() {
@@ -215,7 +341,11 @@ function createMembershipService({ app, dialog, mainWindow: getMainWindow }) {
     return current;
   }
 
-  return { init, status, activateToken, importLicense, removeLicense, assertCanEdit, assertCanUseBuiltinTemplates, machineCode: () => machineCode };
+  return {
+    init, status, activateToken, importLicense, removeLicense,
+    localAdminStatus, adminIssueLicense, adminSelfActivate, adminSaveLicenseFile,
+    assertCanEdit, assertCanUseBuiltinTemplates, machineCode: () => machineCode
+  };
 }
 
-module.exports = { createMachineCode, createMembershipService };
+module.exports = { createMachineCode, createMembershipService, extractLicenseToken };

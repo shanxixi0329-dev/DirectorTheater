@@ -28,8 +28,9 @@ window.createDirectorUI=function({project,view,api,toast,canEdit,isDirty,onAppli
   function patchBody(s){const container=document.getElementById('director-content');if(container)container.innerHTML=body(s);status(s);}
   function patchDetail(s){const target=document.getElementById('director-shot-detail');if(target)target.innerHTML=detail(s);const items=document.getElementById('director-shot-items');if(items)items.innerHTML=list(s);status(s);}
   function status(s){const target=document.getElementById('director-status');if(target){target.textContent=s.error|| (s.pending?'正在读取资料…':s.busy?'正在生成本镜候选，可以停止。':'');target.classList.toggle('notice',Boolean(s.error));}}
+  function trimSnapshots(keepKey){let kept=0;for(const [k,entry]of[...states.entries()].reverse()){if(k===keepKey||entry.busy)continue;if(entry.snapshot&&++kept>1)entry.snapshot=null;}}
   async function load(force=false){const original=project(),p=original?{...original,currentEpisode:original.currentEpisode}:null,s=current();if(!p||!document.getElementById('director-content'))return;if(s.pending)return s.pending;if(s.snapshot&&!force)return;
-    s.pending=api.directorSnapshot(p);s.error='';status(s);try{const value=await s.pending;if(project()?.projectPath!==p.projectPath||project()?.currentEpisode!==p.currentEpisode)return;s.snapshot=value;if(!s.selected||!value.shots.some(x=>x.id===s.selected))s.selected=value.shots[0]?.id||'';for(const [id,d]of Object.entries(s.drafts)){if(!d.dirty&&!d.candidate&&!d.metaDirty&&!d.instruction)delete s.drafts[id];}patchBody(s);}catch(error){s.error=error.message;}finally{s.pending=null;if(current()===s)status(s);}}
+    s.pending=api.directorSnapshot(p);s.error='';status(s);try{const value=await s.pending;if(project()?.projectPath!==p.projectPath||project()?.currentEpisode!==p.currentEpisode)return;s.snapshot=value;trimSnapshots(s.key);if(!s.selected||!value.shots.some(x=>x.id===s.selected))s.selected=value.shots[0]?.id||'';for(const [id,d]of Object.entries(s.drafts)){if(!d.dirty&&!d.candidate&&!d.metaDirty&&!d.instruction)delete s.drafts[id];}patchBody(s);}catch(error){s.error=error.message;}finally{s.pending=null;if(current()===s)status(s);}}
   async function afterApplied(p,value,s){if(project()?.projectPath===p.projectPath&&project()?.currentEpisode===p.currentEpisode){s.snapshot=value;await onApplied(value.files.shotlist);patchBody(s);}}
   async function action(name,button){if(!name?.startsWith('director-'))return false;const original=project(),p=original?{...original,currentEpisode:original.currentEpisode}:null,s=current();if(!s)return true;
     const readOnly=new Set(['director-refresh','director-select','director-edit-asset','director-cancel-asset','director-stop','director-more-assets']);if(!canEdit()&&!readOnly.has(name)){toast('会员已到期，当前可阅读资料。');return true;}
@@ -58,7 +59,7 @@ window.createDirectorUI=function({project,view,api,toast,canEdit,isDirty,onAppli
       }else if(name==='director-stop'){await api.directorCancel();toast('已请求停止本镜辅助。');}
       else if(name==='director-restore'){
         if(isDirty('shotlist'))throw Error('先保存分镜编辑页的改动，再刷新工作台。');
-        if(!window.confirm('恢复这次修改前的这个镜头？其他镜头保留，当前文件会先备份。'))return true;
+        if(!await window.directorConfirm('恢复这次修改前的这个镜头？其他镜头保留，当前文件会先备份。',{title:'恢复镜头版本',confirmLabel:'恢复镜头'}))return true;
         const value=await api.directorRestore(p,{id:button.dataset.revision});delete s.drafts[shot(s).id];remember(s);await afterApplied(p,value,s);toast('这个镜头已恢复。');
       }
     }catch(error){s.error=error.message;status(s);toast(error.message);}return true;

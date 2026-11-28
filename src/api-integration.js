@@ -32,6 +32,7 @@ function selectedEpisodeFile(project, episodeNumber, inputKind, candidates) {
 }
 
 function chooseEquivalentFile(project, episodeNumber, inputKind, folder, candidates) {
+  if (!candidates?.length) return null;
   if (candidates.length === 1) return candidates[0];
   const selected = selectedEpisodeFile(project, episodeNumber, inputKind, candidates);
   if (selected) return selected;
@@ -425,7 +426,10 @@ function createApiService({ readTextDocument, archiveReply, onEvent, assertBuilt
     config.conversationCap = Math.max(1, Math.min(50, Number(payload.conversationCap) || config.conversationCap));
     const start = Math.min(Number(payload.start), Number(payload.end));
     const end = Math.max(Number(payload.start), Number(payload.end));
-    const episodes = (project.episodes || []).map((episode) => Number(episode.number)).filter((number) => number >= start && number <= end).sort((a, b) => a - b);
+    const episodes = (project.episodes || []).map((episode) => Number(episode.number)).filter((number) => {
+      const base = episodeSlots.baseNumber(number);
+      return base >= start && base <= end;
+    }).sort((a, b) => a - b);
     if (!episodes.length) throw new Error('选定范围内没有可处理的集。');
     const smartReadEnabled = config.smartRead !== false;
     const previewByEpisode = new Map();

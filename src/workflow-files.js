@@ -6,14 +6,24 @@ const hash = value => crypto.createHash('sha256').update(String(value)).digest('
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function inside(project, relative) {
   const root = path.resolve(project.projectPath), dest = path.resolve(root, relative);
-  if (!dest.startsWith(root + path.sep)) throw Error('文件必须保存在当前项目内。');
+  const rel = path.relative(root, dest);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw Error('文件必须保存在当前项目内。');
   return dest;
+}
+async function renameWithRetry(from, to) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try { await fs.rename(from, to); return; }
+    catch (error) {
+      if (!['EACCES', 'EBUSY', 'EPERM'].includes(error?.code) || attempt === 5) throw error;
+      await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
 }
 async function read(file) { try { return await fs.readFile(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return ''; throw e; } }
 async function write(file, content) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temp = file + '.' + crypto.randomUUID() + '.tmp';
-  try { await fs.writeFile(temp, content, 'utf8'); await fs.rename(temp, file); }
+  try { await fs.writeFile(temp, content, 'utf8'); await renameWithRetry(temp, file); }
   finally { await fs.rm(temp, { force: true }).catch(() => {}); }
 }
 async function publish(project, file, content) {
